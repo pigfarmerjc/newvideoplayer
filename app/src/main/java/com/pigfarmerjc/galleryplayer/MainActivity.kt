@@ -5,8 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.view.ViewGroup
-import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -20,26 +18,29 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pigfarmerjc.galleryplayer.core.player.api.*
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcPlaybackEngine
+import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
 import kotlinx.coroutines.launch
-import org.videolan.libvlc.util.VLCVideoLayout
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playbackEngine: PlaybackEngine = LibVlcPlaybackEngine(application)
+    val videoOutputFactory: VideoOutputHostFactory = LibVlcVideoOutputHostFactory()
+    var wasPlayingBeforeBackground: Boolean = false
 
     override fun onCleared() {
         super.onCleared()
         playbackEngine.release()
     }
 }
-
-class VlcVideoOutputHost(override val containerView: VLCVideoLayout) : VideoOutputHost
 
 class MainActivity : ComponentActivity() {
 
@@ -75,6 +76,26 @@ class MainActivity : ComponentActivity() {
         var dragPosition by remember { mutableStateOf(0f) }
         var seekSuccessText by remember { mutableStateOf("") }
 
+        // Observe Lifecycle events to pause on background and restore properly
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_PAUSE) {
+                    viewModel.wasPlayingBeforeBackground = (state == PlaybackState.Playing)
+                    engine.pause()
+                } else if (event == Lifecycle.Event.ON_RESUME) {
+                    if (viewModel.wasPlayingBeforeBackground) {
+                        engine.play()
+                        viewModel.wasPlayingBeforeBackground = false
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
+
         val filePicker = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocument()
         ) { uri: Uri? ->
@@ -100,7 +121,7 @@ class MainActivity : ComponentActivity() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "GalleryPlayer Phase 0 Test Host",
+                text = "GalleryPlayer Phase 0.5 Test Host",
                 style = MaterialTheme.typography.titleLarge
             )
 
@@ -119,23 +140,10 @@ class MainActivity : ComponentActivity() {
                 } else {
                     AndroidView(
                         factory = { ctx ->
-                            val frame = FrameLayout(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                            }
-                            val vlcLayout = VLCVideoLayout(ctx).apply {
-                                layoutParams = FrameLayout.LayoutParams(
-                                    FrameLayout.LayoutParams.MATCH_PARENT,
-                                    FrameLayout.LayoutParams.MATCH_PARENT
-                                )
-                            }
-                            frame.addView(vlcLayout)
-                            
-                            // Attach rendering
-                            engine.attachVideoOutput(VlcVideoOutputHost(vlcLayout))
-                            frame
+                            val host = viewModel.videoOutputFactory.create(ctx)
+                            engine.attachVideoOutput(host)
+                            // host.view is returned as a plain android.view.View
+                            host.view
                         },
                         modifier = Modifier.fillMaxSize(),
                         onRelease = {

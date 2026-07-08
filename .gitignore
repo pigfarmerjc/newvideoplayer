@@ -1,6 +1,5 @@
 *.iml
 .gradle
-/local.properties
 /.idea/workspace.xml
 /.idea/libraries
 /.idea/caches
@@ -11,13 +10,12 @@ build/
 /captures
 .externalNativeBuild
 .cxx
-local.properties
 *.apk
 *.aar
 
-# Test media files should be excluded from Git, only the manifest and readme should be committed
-test-media/*.mp4
-test-media/*.mkv
-test-media/*.mov
-test-media/*.wav
-test-media/*.avi
+local.properties
+*.jks
+*.keystore
+test-media/*
+!test-media/README.md
+!test-media/TEST_MEDIA_MANIFEST.md

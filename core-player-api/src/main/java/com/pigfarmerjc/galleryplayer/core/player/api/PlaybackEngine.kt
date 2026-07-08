@@ -1,6 +1,8 @@
 package com.pigfarmerjc.galleryplayer.core.player.api
 
+import android.content.Context
 import android.net.Uri
+import android.view.View
 import kotlinx.coroutines.flow.StateFlow
 
 interface PlaybackEngine {
@@ -26,7 +28,12 @@ interface PlaybackEngine {
 }
 
 interface VideoOutputHost {
-    val containerView: Any
+    val view: View
+    fun dispose()
+}
+
+interface VideoOutputHostFactory {
+    fun create(context: Context): VideoOutputHost
 }
 
 enum class PlaybackState {
@@ -49,7 +56,7 @@ enum class RepeatMode {
 
 enum class DecoderMode {
     AUTO,
-    HARDWARE_PREFERRED,
+    HARDWARE_FORCED,
     SOFTWARE_ONLY
 }
 

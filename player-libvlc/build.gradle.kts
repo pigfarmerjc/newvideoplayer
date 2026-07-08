@@ -22,7 +22,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core-player-api"))
-    api(libs.libvlc.all)
+    implementation(libs.libvlc.all)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     // Test dependencies

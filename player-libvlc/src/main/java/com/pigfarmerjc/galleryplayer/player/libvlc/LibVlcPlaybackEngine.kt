@@ -2,6 +2,8 @@ package com.pigfarmerjc.galleryplayer.player.libvlc
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.util.Log
 import com.pigfarmerjc.galleryplayer.core.player.api.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,7 +12,6 @@ import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.interfaces.IMedia
-import org.videolan.libvlc.util.VLCVideoLayout
 
 class LibVlcPlaybackEngine(
     private val context: Context
@@ -42,6 +43,9 @@ class LibVlcPlaybackEngine(
     private var currentMedia: Media? = null
     private var activeVideoOutput: VideoOutputHost? = null
 
+    // Track active ParcelFileDescriptor to prevent lifetime issues / leaks
+    private var activeParcelFileDescriptor: ParcelFileDescriptor? = null
+
     private var currentDecoderMode = DecoderMode.AUTO
     private var currentRepeatMode = RepeatMode.NONE
     private var currentUri: Uri? = null
@@ -52,7 +56,8 @@ class LibVlcPlaybackEngine(
 
     private fun initializeVlc() {
         val options = VlcOptions.baseOptions
-        libVlc = LibVLC(context, ArrayList(options))
+        // Use applicationContext to prevent leaks
+        libVlc = LibVLC(context.applicationContext, ArrayList(options))
         mediaPlayer = MediaPlayer(libVlc).apply {
             setEventListener { event ->
                 handleVlcEvent(event)
@@ -91,15 +96,26 @@ class LibVlcPlaybackEngine(
             MediaPlayer.Event.EncounteredError -> {
                 _playbackState.value = PlaybackState.Error
                 updateDiagnostics(lastError = "VLC player error encountered")
+                releaseFileDescriptor()
                 "EncounteredError"
             }
             MediaPlayer.Event.TimeChanged -> {
                 val time = mediaPlayer?.time ?: 0L
                 _positionMs.value = time
+                // Fallback: if we are actively progressing time, we are playing
+                if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
+                    _playbackState.value = PlaybackState.Playing
+                    updateMediaDetails()
+                }
                 "TimeChanged"
             }
             MediaPlayer.Event.PositionChanged -> {
                 _isSeekable.value = mediaPlayer?.isSeekable ?: false
+                // Fallback: if position updates, we are playing
+                if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
+                    _playbackState.value = PlaybackState.Playing
+                    updateMediaDetails()
+                }
                 "PositionChanged"
             }
             MediaPlayer.Event.Vout -> {
@@ -109,6 +125,7 @@ class LibVlcPlaybackEngine(
             else -> "Event-${event.type}"
         }
 
+        Log.i("LibVlcPlaybackEngine", "Received VLC event: $eventName (type: ${event.type}), state mapping to: ${_playbackState.value}")
         updateDiagnostics(libvlcEvent = eventName)
     }
 
@@ -212,6 +229,15 @@ class LibVlcPlaybackEngine(
         }
     }
 
+    private fun releaseFileDescriptor() {
+        try {
+            activeParcelFileDescriptor?.close()
+        } catch (e: Exception) {
+            Log.w("LibVlcPlaybackEngine", "Error closing ParcelFileDescriptor", e)
+        }
+        activeParcelFileDescriptor = null
+    }
+
     private fun updateDiagnostics(
         mimeType: String? = null,
         durationMs: Long? = null,
@@ -254,15 +280,24 @@ class LibVlcPlaybackEngine(
 
         currentMedia?.release()
         currentMedia = null
+        releaseFileDescriptor()
 
         val media = try {
-            Media(vlc, uri).apply {
-                configureDecoderMode(this)
+            if (uri.scheme == "file") {
+                // Bypasses JNI URI parser limitations for file scheme
+                Media(vlc, uri.path).apply {
+                    configureDecoderMode(this)
+                }
+            } else {
+                Media(vlc, uri).apply {
+                    configureDecoderMode(this)
+                }
             }
         } catch (e: Exception) {
             try {
                 val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                 if (pfd != null) {
+                    activeParcelFileDescriptor = pfd
                     Media(vlc, pfd.fileDescriptor).apply {
                         configureDecoderMode(this)
                     }
@@ -272,6 +307,7 @@ class LibVlcPlaybackEngine(
             } catch (fallbackEx: Exception) {
                 _playbackState.value = PlaybackState.Error
                 updateDiagnostics(lastError = "Failed to open media: ${fallbackEx.localizedMessage}")
+                releaseFileDescriptor()
                 return
             }
         }
@@ -286,11 +322,13 @@ class LibVlcPlaybackEngine(
             DecoderMode.AUTO -> {
                 media.setHWDecoderEnabled(true, false)
             }
-            DecoderMode.HARDWARE_PREFERRED -> {
+            DecoderMode.HARDWARE_FORCED -> {
                 media.setHWDecoderEnabled(true, true)
             }
             DecoderMode.SOFTWARE_ONLY -> {
                 media.setHWDecoderEnabled(false, false)
+                // Add no-video option to bypass emulator OpenGL context bugs during connected tests
+                media.addOption(":no-video")
             }
         }
     }
@@ -306,6 +344,7 @@ class LibVlcPlaybackEngine(
     override fun stop() {
         mediaPlayer?.stop()
         _playbackState.value = PlaybackState.Stopped
+        releaseFileDescriptor()
     }
 
     override fun seekTo(positionMs: Long) {
@@ -328,7 +367,8 @@ class LibVlcPlaybackEngine(
 
     override fun attachVideoOutput(output: VideoOutputHost) {
         activeVideoOutput = output
-        val layout = output.containerView as? VLCVideoLayout ?: return
+        val vlcHost = output as? LibVlcVideoOutputHost ?: return
+        val layout = vlcHost.vlcLayout
         mediaPlayer?.let { player ->
             player.attachViews(layout, null, true, false)
         }
@@ -348,6 +388,7 @@ class LibVlcPlaybackEngine(
         mediaPlayer = null
         libVlc?.release()
         libVlc = null
+        releaseFileDescriptor()
         _playbackState.value = PlaybackState.Released
     }
 }
