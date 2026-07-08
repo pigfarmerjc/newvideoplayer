@@ -33,3 +33,6 @@ rootProject.name = "GalleryPlayer"
 include(":app")
 include(":core-player-api")
 include(":player-libvlc")
+include(":core-common")
+include(":core-model")
+include(":core-database")

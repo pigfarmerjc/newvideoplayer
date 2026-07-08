@@ -4,13 +4,23 @@ plugins {
 }
 
 android {
-    namespace = "com.pigfarmerjc.galleryplayer.core.player.api"
+    namespace = "com.pigfarmerjc.galleryplayer.core.common"
     compileSdk = 36
 
     defaultConfig {
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -22,9 +32,6 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.core.ktx)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-
-    // Test dependencies
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
 }

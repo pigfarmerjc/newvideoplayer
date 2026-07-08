@@ -1,0 +1,300 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "bfa161651fd0ada89df7bdf6b987684a",
+    "entities": [
+      {
+        "tableName": "media_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_uri` TEXT NOT NULL, `media_store_id` INTEGER, `volume_name` TEXT, `relative_path` TEXT, `display_name` TEXT, `title` TEXT, `duration_ms` INTEGER, `width` INTEGER, `height` INTEGER, `date_modified` INTEGER, `media_type` TEXT, `size_bytes` INTEGER, PRIMARY KEY(`content_uri`))",
+        "fields": [
+          {
+            "fieldPath": "contentUri",
+            "columnName": "content_uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mediaStoreId",
+            "columnName": "media_store_id",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "volumeName",
+            "columnName": "volume_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relative_path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "duration_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "dateModified",
+            "columnName": "date_modified",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "mediaType",
+            "columnName": "media_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "size_bytes",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_uri"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_media_items_volume_name_media_store_id",
+            "unique": true,
+            "columnNames": [
+              "volume_name",
+              "media_store_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_media_items_volume_name_media_store_id` ON `${TABLE_NAME}` (`volume_name`, `media_store_id`)"
+          },
+          {
+            "name": "index_media_items_relative_path",
+            "unique": false,
+            "columnNames": [
+              "relative_path"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_media_items_relative_path` ON `${TABLE_NAME}` (`relative_path`)"
+          },
+          {
+            "name": "index_media_items_date_modified",
+            "unique": false,
+            "columnNames": [
+              "date_modified"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_media_items_date_modified` ON `${TABLE_NAME}` (`date_modified`)"
+          },
+          {
+            "name": "index_media_items_media_type",
+            "unique": false,
+            "columnNames": [
+              "media_type"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_media_items_media_type` ON `${TABLE_NAME}` (`media_type`)"
+          }
+        ]
+      },
+      {
+        "tableName": "folders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`path` TEXT NOT NULL, `display_name` TEXT NOT NULL, `date_modified` INTEGER NOT NULL, PRIMARY KEY(`path`))",
+        "fields": [
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateModified",
+            "columnName": "date_modified",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "path"
+          ]
+        }
+      },
+      {
+        "tableName": "playback_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_uri` TEXT NOT NULL, `last_played_time` INTEGER NOT NULL, `playback_position_ms` INTEGER NOT NULL, `finished` INTEGER NOT NULL, PRIMARY KEY(`content_uri`), FOREIGN KEY(`content_uri`) REFERENCES `media_items`(`content_uri`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "contentUri",
+            "columnName": "content_uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPlayedTime",
+            "columnName": "last_played_time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "playbackPositionMs",
+            "columnName": "playback_position_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finished",
+            "columnName": "finished",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_uri"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "media_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "content_uri"
+            ],
+            "referencedColumns": [
+              "content_uri"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "thumbnail_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_uri` TEXT NOT NULL, `thumbnail_path` TEXT NOT NULL, `size_bytes` INTEGER NOT NULL, `last_accessed` INTEGER NOT NULL, PRIMARY KEY(`content_uri`), FOREIGN KEY(`content_uri`) REFERENCES `media_items`(`content_uri`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "contentUri",
+            "columnName": "content_uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "thumbnailPath",
+            "columnName": "thumbnail_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "size_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAccessed",
+            "columnName": "last_accessed",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_uri"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "media_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "content_uri"
+            ],
+            "referencedColumns": [
+              "content_uri"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "storage_volumes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`volume_name` TEXT NOT NULL, `path` TEXT, `description` TEXT NOT NULL, `total_bytes` INTEGER NOT NULL, `free_bytes` INTEGER NOT NULL, `is_removable` INTEGER NOT NULL, PRIMARY KEY(`volume_name`))",
+        "fields": [
+          {
+            "fieldPath": "volumeName",
+            "columnName": "volume_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "freeBytes",
+            "columnName": "free_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isRemovable",
+            "columnName": "is_removable",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "volume_name"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bfa161651fd0ada89df7bdf6b987684a')"
+    ]
+  }
+}
