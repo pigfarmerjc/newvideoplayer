@@ -7,6 +7,8 @@ import android.util.Log
 import com.pigfarmerjc.galleryplayer.core.player.api.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,9 +19,13 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.interfaces.IMedia
 import java.io.IOException
 
-class LibVlcPlaybackEngine(
-    private val context: Context
+open class LibVlcPlaybackEngine protected constructor(
+    private val context: Context,
+    protected val isTestNoVideoMode: Boolean
 ) : PlaybackEngine {
+
+    constructor(context: Context) : this(context, isTestNoVideoMode = false)
+
 
     private val _playbackState = MutableStateFlow(PlaybackState.Idle)
     override val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
@@ -61,10 +67,7 @@ class LibVlcPlaybackEngine(
     private var currentSourceStrategy = SourceStrategy.DIRECT_URI
     private var hasRetriedForCurrentUri = false
 
-    // Testing-only option to bypass OpenGL on headless environments
-    var isTestNoVideoMode: Boolean = false
-
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var isClosingSource = false
 
     init {
@@ -439,7 +442,7 @@ class LibVlcPlaybackEngine(
         if (uri != null && _playbackState.value != PlaybackState.Idle && _playbackState.value != PlaybackState.Released && _playbackState.value != PlaybackState.Stopped) {
             val wasPlaying = _playbackState.value == PlaybackState.Playing
             val lastPos = mediaPlayer?.time ?: _positionMs.value
-            scope.launch {
+            engineScope.launch {
                 open(uri)
                 if (lastPos > 0) {
                     seekTo(lastPos)
@@ -471,6 +474,7 @@ class LibVlcPlaybackEngine(
     }
 
     override fun release() {
+        engineScope.cancel()
         closeCurrentSource()
         detachVideoOutput()
         mediaPlayer?.release()

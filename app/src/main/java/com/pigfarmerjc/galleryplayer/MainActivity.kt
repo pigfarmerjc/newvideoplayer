@@ -284,7 +284,7 @@ class MainActivity : ComponentActivity() {
                         expanded = repeatExpanded,
                         onDismissRequest = { repeatExpanded = false }
                     ) {
-                        RepeatMode.values().forEach { mode ->
+                        listOf(RepeatMode.NONE, RepeatMode.ONE).forEach { mode ->
                             DropdownMenuItem(
                                 text = { Text(mode.name) },
                                 onClick = {

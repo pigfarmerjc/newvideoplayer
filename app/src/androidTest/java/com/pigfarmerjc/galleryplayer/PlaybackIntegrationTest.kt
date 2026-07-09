@@ -2,17 +2,23 @@ package com.pigfarmerjc.galleryplayer
 
 import android.net.Uri
 import android.util.Log
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackState
+import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHost
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcPlaybackEngine
+import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+
+// derived test configuration for headless environments
+class HeadlessLibVlcPlaybackEngine(context: android.content.Context) : LibVlcPlaybackEngine(context, isTestNoVideoMode = true)
 
 @RunWith(AndroidJUnit4::class)
 class PlaybackIntegrationTest {
@@ -52,12 +58,12 @@ class PlaybackIntegrationTest {
         assertTrue("Test file must exist in app private files directory", targetFile.exists())
         assertTrue("Test file must be readable", targetFile.canRead())
 
-        val engine = LibVlcPlaybackEngine(appTargetContext)
+        // Use the headless derived configuration
+        val engine = HeadlessLibVlcPlaybackEngine(appTargetContext)
         val uri = Uri.fromFile(targetFile)
 
-        // Set to software decoding and enable test-only no-video mode for reliable headless execution
+        // Set to software decoding for reliable headless execution
         engine.setDecoderMode(DecoderMode.SOFTWARE_ONLY)
-        engine.isTestNoVideoMode = true
 
         runBlocking {
             // 1. 成功打开 URI
@@ -140,5 +146,79 @@ class PlaybackIntegrationTest {
             // Remove copied file to clean up storage
             targetFile.delete()
         }
+    }
+
+    @Test
+    fun testRealVideoPlaybackRendering() {
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val testContext = instrumentation.context
+        val appTargetContext = instrumentation.targetContext
+        
+        val targetFile = File(appTargetContext.filesDir, "sample_bbb_rendering.mp4")
+        testContext.assets.open("sample_bbb.mp4").use { inputStream ->
+            targetFile.outputStream().use { outputStream ->
+                inputStream.copyTo(outputStream)
+            }
+        }
+        
+        assertTrue("Test file must exist in app private files directory", targetFile.exists())
+        val uri = Uri.fromFile(targetFile)
+        
+        val decoderModes = listOf(DecoderMode.AUTO, DecoderMode.SOFTWARE_ONLY)
+        
+        for (mode in decoderModes) {
+            Log.i("PlaybackIntegrationTest", "Verifying real video rendering for mode: $mode")
+            
+            var engine: LibVlcPlaybackEngine? = null
+            var videoHost: VideoOutputHost? = null
+            
+            scenario.onActivity { activity ->
+                val eng = LibVlcPlaybackEngine(appTargetContext)
+                eng.setDecoderMode(mode)
+                engine = eng
+                
+                val host = LibVlcVideoOutputHostFactory().create(appTargetContext)
+                eng.attachVideoOutput(host)
+                videoHost = host
+                
+                // Add the VLCVideoLayout view directly to the running Activity's view hierarchy
+                activity.addContentView(
+                    host.view,
+                    android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        400
+                    )
+                )
+            }
+            
+            val activeEngine = engine!!
+            val activeHost = videoHost!!
+            
+            runBlocking {
+                activeEngine.open(uri)
+                waitForState(activeEngine, PlaybackState.Playing)
+                
+                val duration = activeEngine.durationMs.value
+                assertTrue("Duration must be > 0", duration > 0)
+                
+                // Play for 3 seconds of real video output verification
+                val startPos = activeEngine.positionMs.value
+                delay(3000)
+                val endPos = activeEngine.positionMs.value
+                assertTrue("Playback progress should advance under mode $mode (start: $startPos, end: $endPos)", endPos > startPos)
+                
+                scenario.onActivity { activity ->
+                    (activeHost.view.parent as? android.view.ViewGroup)?.removeView(activeHost.view)
+                    activeEngine.detachVideoOutput()
+                    activeHost.dispose()
+                    activeEngine.release()
+                }
+            }
+        }
+        
+        targetFile.delete()
+        scenario.close()
     }
 }
