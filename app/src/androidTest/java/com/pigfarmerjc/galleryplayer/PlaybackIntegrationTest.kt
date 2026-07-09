@@ -55,8 +55,9 @@ class PlaybackIntegrationTest {
         val engine = LibVlcPlaybackEngine(appTargetContext)
         val uri = Uri.fromFile(targetFile)
 
-        // Set to software decoding to enable :no-video audio-only mode for reliable headless execution
+        // Set to software decoding and enable test-only no-video mode for reliable headless execution
         engine.setDecoderMode(DecoderMode.SOFTWARE_ONLY)
+        engine.isTestNoVideoMode = true
 
         runBlocking {
             // 1. 成功打开 URI

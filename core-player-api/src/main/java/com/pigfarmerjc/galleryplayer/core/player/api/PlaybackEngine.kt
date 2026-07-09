@@ -78,5 +78,6 @@ data class PlaybackDiagnostics(
     val channels: Int = 0,
     val decoderMode: DecoderMode = DecoderMode.AUTO,
     val libvlcEvent: String = "",
-    val lastError: String = ""
+    val lastError: String = "",
+    val playbackStrategy: String = "DIRECT_URI"
 )

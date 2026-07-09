@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_PAUSE) {
-                    viewModel.wasPlayingBeforeBackground = (state == PlaybackState.Playing)
+                    viewModel.wasPlayingBeforeBackground = (engine.playbackState.value == PlaybackState.Playing)
                     engine.pause()
                 } else if (event == Lifecycle.Event.ON_RESUME) {
                     if (viewModel.wasPlayingBeforeBackground) {
@@ -138,16 +138,20 @@ class MainActivity : ComponentActivity() {
                 if (state == PlaybackState.Idle || state == PlaybackState.Released) {
                     Text(text = "No Media Loaded", color = Color.White)
                 } else {
+                    var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
                     AndroidView(
                         factory = { ctx ->
                             val host = viewModel.videoOutputFactory.create(ctx)
+                            videoHost = host
                             engine.attachVideoOutput(host)
                             // host.view is returned as a plain android.view.View
                             host.view
                         },
                         modifier = Modifier.fillMaxSize(),
-                        onRelease = {
+                        onRelease = { view ->
                             engine.detachVideoOutput()
+                            videoHost?.dispose()
+                            videoHost = null
                         }
                     )
                 }

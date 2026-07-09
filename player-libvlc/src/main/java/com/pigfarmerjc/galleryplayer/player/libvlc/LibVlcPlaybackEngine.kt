@@ -5,13 +5,17 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.pigfarmerjc.galleryplayer.core.player.api.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.interfaces.IMedia
+import java.io.IOException
 
 class LibVlcPlaybackEngine(
     private val context: Context
@@ -50,13 +54,25 @@ class LibVlcPlaybackEngine(
     private var currentRepeatMode = RepeatMode.NONE
     private var currentUri: Uri? = null
 
+    private enum class SourceStrategy {
+        DIRECT_URI,
+        FILE_DESCRIPTOR
+    }
+    private var currentSourceStrategy = SourceStrategy.DIRECT_URI
+    private var hasRetriedForCurrentUri = false
+
+    // Testing-only option to bypass OpenGL on headless environments
+    var isTestNoVideoMode: Boolean = false
+
+    private val scope = CoroutineScope(Dispatchers.Main)
+    private var isClosingSource = false
+
     init {
         initializeVlc()
     }
 
     private fun initializeVlc() {
         val options = VlcOptions.baseOptions
-        // Use applicationContext to prevent leaks
         libVlc = LibVLC(context.applicationContext, ArrayList(options))
         mediaPlayer = MediaPlayer(libVlc).apply {
             setEventListener { event ->
@@ -94,15 +110,30 @@ class LibVlcPlaybackEngine(
                 "EndReached"
             }
             MediaPlayer.Event.EncounteredError -> {
+                Log.e("LibVlcPlaybackEngine", "Async error encountered. Current strategy: $currentSourceStrategy")
+                if (currentSourceStrategy == SourceStrategy.DIRECT_URI && !hasRetriedForCurrentUri) {
+                    hasRetriedForCurrentUri = true
+                    val uri = currentUri
+                    if (uri != null) {
+                        Log.i("LibVlcPlaybackEngine", "DIRECT_URI failed asynchronously. Retrying with FILE_DESCRIPTOR.")
+                        updateDiagnostics(
+                            lastError = "Async DIRECT_URI failed. Retrying with FILE_DESCRIPTOR.",
+                            playbackStrategy = "FILE_DESCRIPTOR"
+                        )
+                        closeCurrentSource()
+                        currentUri = uri
+                        tryToLoadMedia(uri, SourceStrategy.FILE_DESCRIPTOR)
+                        return
+                    }
+                }
                 _playbackState.value = PlaybackState.Error
                 updateDiagnostics(lastError = "VLC player error encountered")
-                releaseFileDescriptor()
+                closeCurrentSource()
                 "EncounteredError"
             }
             MediaPlayer.Event.TimeChanged -> {
                 val time = mediaPlayer?.time ?: 0L
                 _positionMs.value = time
-                // Fallback: if we are actively progressing time, we are playing
                 if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
                     _playbackState.value = PlaybackState.Playing
                     updateMediaDetails()
@@ -111,7 +142,6 @@ class LibVlcPlaybackEngine(
             }
             MediaPlayer.Event.PositionChanged -> {
                 _isSeekable.value = mediaPlayer?.isSeekable ?: false
-                // Fallback: if position updates, we are playing
                 if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
                     _playbackState.value = PlaybackState.Playing
                     updateMediaDetails()
@@ -125,20 +155,23 @@ class LibVlcPlaybackEngine(
             else -> "Event-${event.type}"
         }
 
-        Log.i("LibVlcPlaybackEngine", "Received VLC event: $eventName (type: ${event.type}), state mapping to: ${_playbackState.value}")
-        updateDiagnostics(libvlcEvent = eventName)
+        // Do not print TimeChanged or PositionChanged in high-frequency logs to avoid spamming
+        if (event.type != MediaPlayer.Event.TimeChanged && event.type != MediaPlayer.Event.PositionChanged) {
+            Log.i("LibVlcPlaybackEngine", "Received VLC event: $eventName (type: ${event.type}), state: ${_playbackState.value}")
+            updateDiagnostics(libvlcEvent = eventName)
+        }
     }
 
     private fun handlePlaybackEnded() {
         when (currentRepeatMode) {
-            RepeatMode.ONE, RepeatMode.ALL -> {
+            RepeatMode.ONE -> {
                 mediaPlayer?.let { player ->
                     player.time = 0
                     player.play()
                 }
             }
-            RepeatMode.NONE -> {
-                // Do nothing
+            RepeatMode.NONE, RepeatMode.ALL -> {
+                // ALL is delegated to future PlaylistController, single looping is disabled here.
             }
         }
     }
@@ -150,7 +183,6 @@ class LibVlcPlaybackEngine(
         _isSeekable.value = player.isSeekable
 
         val media = currentMedia ?: return
-
         var videoTracks = 0
         var audioTracks = 0
         var sampleRate = 0
@@ -171,14 +203,14 @@ class LibVlcPlaybackEngine(
                         width = videoTrack.width
                         height = videoTrack.height
                         rotation = when (videoTrack.orientation) {
-                            0 -> 0      // TopLeft
-                            1 -> 0      // TopRight
-                            2 -> 180    // BottomRight
-                            3 -> 180    // BottomLeft
-                            4 -> 90     // LeftTop
-                            5 -> 90     // RightTop
-                            6 -> 270    // RightBottom
-                            7 -> 270    // LeftBottom
+                            0 -> 0
+                            1 -> 0
+                            2 -> 180
+                            3 -> 180
+                            4 -> 90
+                            5 -> 90
+                            6 -> 270
+                            7 -> 270
                             else -> 0
                         }
                         _videoSize.value = VideoSize(width, height)
@@ -249,7 +281,8 @@ class LibVlcPlaybackEngine(
         sampleRate: Int? = null,
         channels: Int? = null,
         libvlcEvent: String? = null,
-        lastError: String? = null
+        lastError: String? = null,
+        playbackStrategy: String? = null
     ) {
         val currentDiag = _diagnostics.value
         _diagnostics.value = currentDiag.copy(
@@ -265,56 +298,80 @@ class LibVlcPlaybackEngine(
             channels = channels ?: currentDiag.channels,
             decoderMode = currentDecoderMode,
             libvlcEvent = libvlcEvent ?: currentDiag.libvlcEvent,
-            lastError = lastError ?: currentDiag.lastError
+            lastError = lastError ?: currentDiag.lastError,
+            playbackStrategy = playbackStrategy ?: currentDiag.playbackStrategy
         )
     }
 
+    private fun closeCurrentSource() {
+        if (isClosingSource) return
+        isClosingSource = true
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.media = null
+            currentMedia?.release()
+            currentMedia = null
+            releaseFileDescriptor()
+            currentUri = null
+            _playbackState.value = PlaybackState.Idle
+            _videoSize.value = null
+        } finally {
+            isClosingSource = false
+        }
+    }
+
     override suspend fun open(uri: Uri) {
+        closeCurrentSource()
         currentUri = uri
         _positionMs.value = 0L
         _durationMs.value = 0L
         _videoSize.value = null
+        hasRetriedForCurrentUri = false
+        tryToLoadMedia(uri, SourceStrategy.DIRECT_URI)
+    }
 
+    private fun tryToLoadMedia(uri: Uri, strategy: SourceStrategy) {
         val vlc = libVlc ?: return
         val player = mediaPlayer ?: return
+        currentSourceStrategy = strategy
 
-        currentMedia?.release()
-        currentMedia = null
-        releaseFileDescriptor()
-
-        val media = try {
-            if (uri.scheme == "file") {
-                // Bypasses JNI URI parser limitations for file scheme
-                Media(vlc, uri.path).apply {
-                    configureDecoderMode(this)
+        try {
+            val media = when (strategy) {
+                SourceStrategy.DIRECT_URI -> {
+                    if (uri.scheme == "file") {
+                        Media(vlc, uri.path)
+                    } else {
+                        Media(vlc, uri)
+                    }
                 }
-            } else {
-                Media(vlc, uri).apply {
-                    configureDecoderMode(this)
+                SourceStrategy.FILE_DESCRIPTOR -> {
+                    val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                        ?: throw IOException("Failed to open file descriptor for $uri")
+                    activeParcelFileDescriptor = pfd
+                    Media(vlc, pfd.fileDescriptor)
                 }
             }
+            media.apply {
+                configureDecoderMode(this)
+            }
+            currentMedia = media
+            player.media = media
+            player.play()
+            updateDiagnostics(playbackStrategy = strategy.name)
         } catch (e: Exception) {
-            try {
-                val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-                if (pfd != null) {
-                    activeParcelFileDescriptor = pfd
-                    Media(vlc, pfd.fileDescriptor).apply {
-                        configureDecoderMode(this)
-                    }
-                } else {
-                    throw e
-                }
-            } catch (fallbackEx: Exception) {
+            Log.e("LibVlcPlaybackEngine", "Error loading media with strategy $strategy: ${e.message}", e)
+            if (strategy == SourceStrategy.DIRECT_URI && !hasRetriedForCurrentUri) {
+                hasRetriedForCurrentUri = true
+                updateDiagnostics(lastError = "Direct URI failed: ${e.localizedMessage}. Retrying with FD.")
+                closeCurrentSource()
+                currentUri = uri
+                tryToLoadMedia(uri, SourceStrategy.FILE_DESCRIPTOR)
+            } else {
                 _playbackState.value = PlaybackState.Error
-                updateDiagnostics(lastError = "Failed to open media: ${fallbackEx.localizedMessage}")
-                releaseFileDescriptor()
-                return
+                updateDiagnostics(lastError = "Failed to open media: ${e.localizedMessage}")
+                closeCurrentSource()
             }
         }
-
-        currentMedia = media
-        player.media = media
-        player.play()
     }
 
     private fun configureDecoderMode(media: Media) {
@@ -327,9 +384,10 @@ class LibVlcPlaybackEngine(
             }
             DecoderMode.SOFTWARE_ONLY -> {
                 media.setHWDecoderEnabled(false, false)
-                // Add no-video option to bypass emulator OpenGL context bugs during connected tests
-                media.addOption(":no-video")
             }
+        }
+        if (isTestNoVideoMode) {
+            media.addOption(":no-video")
         }
     }
 
@@ -342,16 +400,28 @@ class LibVlcPlaybackEngine(
     }
 
     override fun stop() {
-        mediaPlayer?.stop()
+        closeCurrentSource()
         _playbackState.value = PlaybackState.Stopped
-        releaseFileDescriptor()
     }
 
     override fun seekTo(positionMs: Long) {
-        mediaPlayer?.time = positionMs
+        val player = mediaPlayer ?: return
+        if (!_isSeekable.value) return
+        val duration = _durationMs.value
+        val targetPos = if (duration > 0) {
+            positionMs.coerceIn(0L, duration)
+        } else {
+            positionMs.coerceAtLeast(0L)
+        }
+        player.time = targetPos
+        _positionMs.value = targetPos
     }
 
     override fun setSpeed(speed: Float) {
+        if (speed.isNaN() || speed.isInfinite() || speed < 0.10f || speed > 4.00f) {
+            Log.w("LibVlcPlaybackEngine", "Invalid speed value rejected: $speed")
+            return
+        }
         mediaPlayer?.rate = speed
         _playbackSpeed.value = speed
     }
@@ -361,14 +431,35 @@ class LibVlcPlaybackEngine(
     }
 
     override fun setDecoderMode(mode: DecoderMode) {
+        if (currentDecoderMode == mode) return
         currentDecoderMode = mode
         updateDiagnostics()
+
+        val uri = currentUri
+        if (uri != null && _playbackState.value != PlaybackState.Idle && _playbackState.value != PlaybackState.Released && _playbackState.value != PlaybackState.Stopped) {
+            val wasPlaying = _playbackState.value == PlaybackState.Playing
+            val lastPos = mediaPlayer?.time ?: _positionMs.value
+            scope.launch {
+                open(uri)
+                if (lastPos > 0) {
+                    seekTo(lastPos)
+                }
+                if (wasPlaying) {
+                    play()
+                } else {
+                    pause()
+                }
+            }
+        }
     }
 
     override fun attachVideoOutput(output: VideoOutputHost) {
+        if (activeVideoOutput != null && activeVideoOutput != output) {
+            detachVideoOutput()
+        }
         activeVideoOutput = output
         val vlcHost = output as? LibVlcVideoOutputHost ?: return
-        val layout = vlcHost.vlcLayout
+        val layout = vlcHost.vlcLayout ?: return
         mediaPlayer?.let { player ->
             player.attachViews(layout, null, true, false)
         }
@@ -380,15 +471,12 @@ class LibVlcPlaybackEngine(
     }
 
     override fun release() {
-        stop()
+        closeCurrentSource()
         detachVideoOutput()
-        currentMedia?.release()
-        currentMedia = null
         mediaPlayer?.release()
         mediaPlayer = null
         libVlc?.release()
         libVlc = null
-        releaseFileDescriptor()
         _playbackState.value = PlaybackState.Released
     }
 }

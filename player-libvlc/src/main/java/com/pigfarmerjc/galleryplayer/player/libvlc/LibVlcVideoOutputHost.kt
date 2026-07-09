@@ -7,12 +7,15 @@ import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import org.videolan.libvlc.util.VLCVideoLayout
 
 class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
-    private val vlcVideoLayout = VLCVideoLayout(context)
-    override val view: View get() = vlcVideoLayout
-    val vlcLayout: VLCVideoLayout get() = vlcVideoLayout
+    private var vlcVideoLayout: VLCVideoLayout? = VLCVideoLayout(context)
+    override val view: View get() = vlcVideoLayout ?: throw IllegalStateException("LibVlcVideoOutputHost is already disposed")
+    val vlcLayout: VLCVideoLayout? get() = vlcVideoLayout
 
     override fun dispose() {
-        // Clean up or release resources if necessary
+        vlcVideoLayout?.let { layout ->
+            (layout.parent as? android.view.ViewGroup)?.removeView(layout)
+        }
+        vlcVideoLayout = null
     }
 }
 
