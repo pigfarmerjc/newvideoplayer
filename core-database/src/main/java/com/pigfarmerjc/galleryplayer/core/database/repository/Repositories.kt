@@ -2,8 +2,10 @@ package com.pigfarmerjc.galleryplayer.core.database.repository
 
 import com.pigfarmerjc.galleryplayer.core.database.dao.MediaItemDao
 import com.pigfarmerjc.galleryplayer.core.database.dao.PlaybackHistoryDao
+import com.pigfarmerjc.galleryplayer.core.database.dao.FolderDao
 import com.pigfarmerjc.galleryplayer.core.database.entity.MediaItemEntity
 import com.pigfarmerjc.galleryplayer.core.database.entity.PlaybackHistoryEntity
+import com.pigfarmerjc.galleryplayer.core.database.entity.FolderEntity
 import com.pigfarmerjc.galleryplayer.core.model.MediaItem
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 import com.pigfarmerjc.galleryplayer.core.model.ScanState
@@ -80,6 +82,11 @@ interface MediaRepository {
     fun getMediaItems(): Flow<List<MediaItem>>
     fun getMediaItemsInFolder(folderPath: String): Flow<List<MediaItem>>
     fun getMediaItemsOnVolume(volumeName: String): Flow<List<MediaItem>>
+    suspend fun getMediaItemsOnVolumeSync(volumeName: String): List<MediaItem>
+    suspend fun getFolderMediaItems(volumeName: String, relativePath: String): List<MediaItem>
+    suspend fun getFolderByVolumeAndPath(volumeName: String, relativePath: String): FolderEntity?
+    suspend fun saveFolder(folder: FolderEntity)
+    suspend fun deleteFolder(volumeName: String, relativePath: String)
     suspend fun saveMediaItems(items: List<MediaItem>)
     suspend fun deleteMediaItem(contentUri: String)
 }
@@ -104,7 +111,8 @@ interface PlaybackHistoryRepository {
 
 // Room database repository implementations
 class RoomMediaRepository(
-    private val mediaItemDao: MediaItemDao
+    private val mediaItemDao: MediaItemDao,
+    private val folderDao: FolderDao
 ) : MediaRepository {
 
     override fun getMediaItems(): Flow<List<MediaItem>> {
@@ -117,6 +125,26 @@ class RoomMediaRepository(
 
     override fun getMediaItemsOnVolume(volumeName: String): Flow<List<MediaItem>> {
         return mediaItemDao.getByVolume(volumeName).map { list -> list.map { it.toDomain() } }
+    }
+
+    override suspend fun getMediaItemsOnVolumeSync(volumeName: String): List<MediaItem> {
+        return mediaItemDao.getByVolumeSync(volumeName).map { it.toDomain() }
+    }
+
+    override suspend fun getFolderMediaItems(volumeName: String, relativePath: String): List<MediaItem> {
+        return mediaItemDao.getByFolderSync(volumeName, relativePath).map { it.toDomain() }
+    }
+
+    override suspend fun getFolderByVolumeAndPath(volumeName: String, relativePath: String): FolderEntity? {
+        return folderDao.getByVolumeAndPath(volumeName, relativePath)
+    }
+
+    override suspend fun saveFolder(folder: FolderEntity) {
+        folderDao.upsert(folder)
+    }
+
+    override suspend fun deleteFolder(volumeName: String, relativePath: String) {
+        folderDao.deleteByVolumeAndPath(volumeName, relativePath)
     }
 
     override suspend fun saveMediaItems(items: List<MediaItem>) {

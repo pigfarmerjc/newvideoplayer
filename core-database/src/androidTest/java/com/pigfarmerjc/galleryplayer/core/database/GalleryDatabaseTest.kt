@@ -60,7 +60,7 @@ class GalleryDatabaseTest {
         thumbnailCacheDao = db.thumbnailCacheDao()
         storageVolumeDao = db.storageVolumeDao()
 
-        mediaRepository = RoomMediaRepository(mediaItemDao)
+        mediaRepository = RoomMediaRepository(mediaItemDao, folderDao)
         playbackHistoryRepository = RoomPlaybackHistoryRepository(playbackHistoryDao, mediaItemDao)
     }
 

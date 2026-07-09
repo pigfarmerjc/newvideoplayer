@@ -59,6 +59,12 @@ interface MediaItemDao {
     @Query("SELECT * FROM media_items WHERE relative_path = :relativePath")
     fun getByFolder(relativePath: String): Flow<List<MediaItemEntity>>
 
+    @Query("SELECT * FROM media_items WHERE volume_name = :volumeName")
+    suspend fun getByVolumeSync(volumeName: String): List<MediaItemEntity>
+
+    @Query("SELECT * FROM media_items WHERE volume_name = :volumeName AND relative_path = :relativePath")
+    suspend fun getByFolderSync(volumeName: String, relativePath: String): List<MediaItemEntity>
+
     @Query("SELECT * FROM media_items WHERE content_uri = :contentUri LIMIT 1")
     suspend fun getByUri(contentUri: String): MediaItemEntity?
 
@@ -76,6 +82,9 @@ interface FolderDao {
 
     @Query("SELECT * FROM folders WHERE volume_name = :volumeName AND relative_path = :relativePath LIMIT 1")
     suspend fun getByVolumeAndPath(volumeName: String, relativePath: String): FolderEntity?
+
+    @Query("DELETE FROM folders WHERE volume_name = :volumeName AND relative_path = :relativePath")
+    suspend fun deleteByVolumeAndPath(volumeName: String, relativePath: String)
 
     @Transaction
     suspend fun upsert(folder: FolderEntity): Long {
