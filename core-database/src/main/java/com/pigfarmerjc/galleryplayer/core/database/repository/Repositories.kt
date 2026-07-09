@@ -6,38 +6,73 @@ import com.pigfarmerjc.galleryplayer.core.database.entity.MediaItemEntity
 import com.pigfarmerjc.galleryplayer.core.database.entity.PlaybackHistoryEntity
 import com.pigfarmerjc.galleryplayer.core.model.MediaItem
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
+import com.pigfarmerjc.galleryplayer.core.model.ScanState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 // Mappings between Room entities and pure domain models
 fun MediaItemEntity.toDomain(): MediaItem = MediaItem(
+    databaseId = id,
     contentUri = contentUri,
-    mediaStoreId = mediaStoreId,
+    mediaType = MediaType.valueOf(mediaType),
     volumeName = volumeName,
+    mediaStoreId = mediaStoreId,
     relativePath = relativePath,
     displayName = displayName,
-    title = title,
+    mimeType = mimeType,
+    fileSize = fileSize,
     durationMs = durationMs,
     width = width,
     height = height,
-    dateModified = dateModified,
-    mediaType = mediaType?.let { MediaType.valueOf(it) },
-    sizeBytes = sizeBytes
+    rotationDegrees = rotationDegrees,
+    dateAddedEpochSeconds = dateAddedEpochSeconds,
+    dateModifiedEpochSeconds = dateModifiedEpochSeconds,
+    dateTakenEpochMillis = dateTakenEpochMillis,
+    videoCodec = videoCodec,
+    audioCodec = audioCodec,
+    audioSampleFormat = audioSampleFormat,
+    audioSampleRate = audioSampleRate,
+    audioChannels = audioChannels,
+    frameRate = frameRate,
+    bitrate = bitrate,
+    isHdr = isHdr,
+    isGif = isGif,
+    isFavorite = isFavorite,
+    isHidden = isHidden,
+    scanState = ScanState.valueOf(scanState),
+    lastError = lastError
 )
 
 fun MediaItem.toEntity(): MediaItemEntity = MediaItemEntity(
+    id = databaseId,
     contentUri = contentUri,
-    mediaStoreId = mediaStoreId,
+    mediaType = mediaType.name,
     volumeName = volumeName,
+    mediaStoreId = mediaStoreId,
     relativePath = relativePath,
     displayName = displayName,
-    title = title,
+    mimeType = mimeType,
+    fileSize = fileSize,
     durationMs = durationMs,
     width = width,
     height = height,
-    dateModified = dateModified,
-    mediaType = mediaType?.name,
-    sizeBytes = sizeBytes
+    rotationDegrees = rotationDegrees,
+    dateAddedEpochSeconds = dateAddedEpochSeconds,
+    dateModifiedEpochSeconds = dateModifiedEpochSeconds,
+    dateTakenEpochMillis = dateTakenEpochMillis,
+    videoCodec = videoCodec,
+    audioCodec = audioCodec,
+    audioSampleFormat = audioSampleFormat,
+    audioSampleRate = audioSampleRate,
+    audioChannels = audioChannels,
+    frameRate = frameRate,
+    bitrate = bitrate,
+    isHdr = isHdr,
+    isGif = isGif,
+    isFavorite = isFavorite,
+    isHidden = isHidden,
+    scanState = scanState.name,
+    lastError = lastError
 )
 
 // Repository interfaces definitions
@@ -50,10 +85,14 @@ interface MediaRepository {
 }
 
 data class PlaybackHistoryItem(
+    val mediaId: Long,
     val contentUri: String,
     val lastPlayedTime: Long,
     val playbackPositionMs: Long,
+    val durationMs: Long,
     val finished: Boolean,
+    val playCount: Int,
+    val preferredSpeed: Float,
     val mediaItem: MediaItem?
 )
 
@@ -90,17 +129,26 @@ class RoomMediaRepository(
 }
 
 class RoomPlaybackHistoryRepository(
-    private val playbackHistoryDao: PlaybackHistoryDao
+    private val playbackHistoryDao: PlaybackHistoryDao,
+    private val mediaItemDao: MediaItemDao
 ) : PlaybackHistoryRepository {
+
+    companion object {
+        const val COMPLETION_THRESHOLD = 0.90
+    }
 
     override fun getHistory(): Flow<List<PlaybackHistoryItem>> {
         return playbackHistoryDao.getHistoryWithMediaItem().map { list ->
             list.map { item ->
                 PlaybackHistoryItem(
-                    contentUri = item.history.contentUri,
-                    lastPlayedTime = item.history.lastPlayedTime,
-                    playbackPositionMs = item.history.playbackPositionMs,
-                    finished = item.history.finished,
+                    mediaId = item.history.mediaId,
+                    contentUri = item.mediaItem?.contentUri ?: "",
+                    lastPlayedTime = item.history.lastPlayedAt,
+                    playbackPositionMs = item.history.positionMs,
+                    durationMs = item.history.durationMs,
+                    finished = item.history.completed,
+                    playCount = item.history.playCount,
+                    preferredSpeed = item.history.preferredSpeed,
                     mediaItem = item.mediaItem?.toDomain()
                 )
             }
@@ -108,13 +156,32 @@ class RoomPlaybackHistoryRepository(
     }
 
     override suspend fun saveHistory(contentUri: String, positionMs: Long, durationMs: Long, finished: Boolean) {
+        val mediaItem = mediaItemDao.getByUri(contentUri) ?: return
+        val existing = playbackHistoryDao.getByMediaId(mediaItem.id)
+
+        // Rule: if position / duration >= 0.90, mark as completed
+        val calculatedFinished = if (durationMs > 0) {
+            (positionMs.toDouble() / durationMs.toDouble()) >= COMPLETION_THRESHOLD
+        } else {
+            finished
+        }
+
+        val newPlayCount = if (existing != null) {
+            existing.playCount + 1
+        } else {
+            1
+        }
+
         val history = PlaybackHistoryEntity(
-            contentUri = contentUri,
-            lastPlayedTime = System.currentTimeMillis(),
-            playbackPositionMs = positionMs,
-            finished = finished
+            mediaId = mediaItem.id,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            lastPlayedAt = System.currentTimeMillis(),
+            completed = calculatedFinished,
+            playCount = newPlayCount,
+            preferredSpeed = existing?.preferredSpeed ?: 1.0f
         )
-        playbackHistoryDao.insertOrReplace(history)
+        playbackHistoryDao.upsert(history)
     }
 
     override suspend fun deleteHistory(contentUri: String) {
