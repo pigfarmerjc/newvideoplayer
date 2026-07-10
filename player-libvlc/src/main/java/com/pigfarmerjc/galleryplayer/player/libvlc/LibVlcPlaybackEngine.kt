@@ -491,6 +491,8 @@ open class LibVlcPlaybackEngine protected constructor(
     override fun updateViewportDiagnostics(
         containerWidth: Int,
         containerHeight: Int,
+        vlcLayoutWidth: Int,
+        vlcLayoutHeight: Int,
         isVideoSizeKnown: Boolean,
         lastViewportRect: String,
         scaleMode: VideoScaleMode
@@ -499,9 +501,28 @@ open class LibVlcPlaybackEngine protected constructor(
         _diagnostics.value = currentDiag.copy(
             containerWidth = containerWidth,
             containerHeight = containerHeight,
+            videoHostWidth = containerWidth,
+            videoHostHeight = containerHeight,
+            vlcVideoLayoutWidth = vlcLayoutWidth,
+            vlcVideoLayoutHeight = vlcLayoutHeight,
             isVideoSizeKnown = isVideoSizeKnown,
             lastViewportRect = lastViewportRect,
             scaleMode = scaleMode
+        )
+    }
+
+    override fun updateViewSizes(
+        playerRootWidth: Int,
+        playerRootHeight: Int,
+        androidViewWidth: Int,
+        androidViewHeight: Int
+    ) {
+        val currentDiag = _diagnostics.value
+        _diagnostics.value = currentDiag.copy(
+            playerRootWidth = playerRootWidth,
+            playerRootHeight = playerRootHeight,
+            androidViewWidth = androidViewWidth,
+            androidViewHeight = androidViewHeight
         )
     }
 
@@ -522,8 +543,8 @@ open class LibVlcPlaybackEngine protected constructor(
         )
 
         val vlcHost = output as? LibVlcVideoOutputHost ?: return
-        vlcHost.onViewportChanged = { containerWidth, containerHeight, isVideoSizeKnown, lastViewportRect, scaleMode ->
-            updateViewportDiagnostics(containerWidth, containerHeight, isVideoSizeKnown, lastViewportRect, scaleMode)
+        vlcHost.onViewportChanged = { containerWidth, containerHeight, childW, childH, isVideoSizeKnown, lastViewportRect, scaleMode ->
+            updateViewportDiagnostics(containerWidth, containerHeight, childW, childH, isVideoSizeKnown, lastViewportRect, scaleMode)
         }
 
         val layout = vlcHost.vlcLayout ?: return

@@ -7,6 +7,7 @@ data class ViewportRect(val left: Int, val top: Int, val right: Int, val bottom:
     val height: Int get() = bottom - top
 }
 
+// Viewport calculator is currently disabled for live VLCVideoLayout sizing because it caused tiny video surface issues on real devices.
 object VideoViewportCalculator {
     fun calculate(
         containerWidth: Int,

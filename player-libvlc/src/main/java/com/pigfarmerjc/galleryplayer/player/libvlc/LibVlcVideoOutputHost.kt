@@ -1,18 +1,16 @@
 package com.pigfarmerjc.galleryplayer.player.libvlc
 
 import android.content.Context
-import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHost
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoScaleMode
-import com.pigfarmerjc.galleryplayer.core.player.api.VideoViewportCalculator
 import org.videolan.libvlc.util.VLCVideoLayout
 
 class VideoScaleFrameLayout(
     context: Context,
-    private val onViewportChanged: (width: Int, height: Int, isSizeKnown: Boolean, rectStr: String, mode: VideoScaleMode) -> Unit
+    private val onViewportChanged: (width: Int, height: Int, childW: Int, childH: Int, isSizeKnown: Boolean, rectStr: String, mode: VideoScaleMode) -> Unit
 ) : FrameLayout(context) {
     private var videoWidth = 0
     private var videoHeight = 0
@@ -21,7 +19,7 @@ class VideoScaleFrameLayout(
     private val vlcVideoLayout = VLCVideoLayout(context)
 
     init {
-        addView(vlcVideoLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
+        addView(vlcVideoLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     val vlcLayout: VLCVideoLayout
@@ -47,48 +45,48 @@ class VideoScaleFrameLayout(
         val parentWidth = MeasureSpec.getSize(widthMeasureSpec)
         val parentHeight = MeasureSpec.getSize(heightMeasureSpec)
 
-        val rect = VideoViewportCalculator.calculate(
-            containerWidth = parentWidth,
-            containerHeight = parentHeight,
-            videoWidth = videoWidth,
-            videoHeight = videoHeight,
-            rotation = videoRotation,
-            mode = scaleMode
-        )
-
-        val childWidthSpec = MeasureSpec.makeMeasureSpec(rect.width, MeasureSpec.EXACTLY)
-        val childHeightSpec = MeasureSpec.makeMeasureSpec(rect.height, MeasureSpec.EXACTLY)
+        // Force child (VLCVideoLayout) to be measured with EXACTLY container width / height
+        val childWidthSpec = MeasureSpec.makeMeasureSpec(parentWidth, MeasureSpec.EXACTLY)
+        val childHeightSpec = MeasureSpec.makeMeasureSpec(parentHeight, MeasureSpec.EXACTLY)
         vlcVideoLayout.measure(childWidthSpec, childHeightSpec)
 
         setMeasuredDimension(parentWidth, parentHeight)
         
-        onViewportChanged(parentWidth, parentHeight, videoWidth > 0 && videoHeight > 0, rect.toString(), scaleMode)
+        onViewportChanged(
+            parentWidth,
+            parentHeight,
+            vlcVideoLayout.measuredWidth,
+            vlcVideoLayout.measuredHeight,
+            videoWidth > 0 && videoHeight > 0,
+            "ViewportRect(0, 0, $parentWidth, $parentHeight)",
+            scaleMode
+        )
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val parentWidth = right - left
         val parentHeight = bottom - top
 
-        val rect = VideoViewportCalculator.calculate(
-            containerWidth = parentWidth,
-            containerHeight = parentHeight,
-            videoWidth = videoWidth,
-            videoHeight = videoHeight,
-            rotation = videoRotation,
-            mode = scaleMode
-        )
-
-        vlcVideoLayout.layout(rect.left, rect.top, rect.right, rect.bottom)
+        // Force child to fill the entire container frame
+        vlcVideoLayout.layout(0, 0, parentWidth, parentHeight)
         
-        onViewportChanged(parentWidth, parentHeight, videoWidth > 0 && videoHeight > 0, rect.toString(), scaleMode)
+        onViewportChanged(
+            parentWidth,
+            parentHeight,
+            vlcVideoLayout.measuredWidth,
+            vlcVideoLayout.measuredHeight,
+            videoWidth > 0 && videoHeight > 0,
+            "ViewportRect(0, 0, $parentWidth, $parentHeight)",
+            scaleMode
+        )
     }
 }
 
 class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
-    var onViewportChanged: ((containerWidth: Int, containerHeight: Int, isVideoSizeKnown: Boolean, lastViewportRect: String, scaleMode: VideoScaleMode) -> Unit)? = null
+    var onViewportChanged: ((containerWidth: Int, containerHeight: Int, vlcLayoutWidth: Int, vlcLayoutHeight: Int, isVideoSizeKnown: Boolean, lastViewportRect: String, scaleMode: VideoScaleMode) -> Unit)? = null
 
-    private var containerFrame: VideoScaleFrameLayout? = VideoScaleFrameLayout(context.applicationContext) { w, h, isKnown, rect, mode ->
-        onViewportChanged?.invoke(w, h, isKnown, rect, mode)
+    private var containerFrame: VideoScaleFrameLayout? = VideoScaleFrameLayout(context.applicationContext) { w, h, childW, childH, isKnown, rect, mode ->
+        onViewportChanged?.invoke(w, h, childW, childH, isKnown, rect, mode)
     }
     private var isDisposed = false
 
@@ -97,7 +95,14 @@ class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
             if (isDisposed) {
                 throw IllegalStateException("LibVlcVideoOutputHost is already disposed")
             }
-            return containerFrame ?: throw IllegalStateException("LibVlcVideoOutputHost is null")
+            val frame = containerFrame ?: throw IllegalStateException("LibVlcVideoOutputHost is null")
+            if (frame.layoutParams == null) {
+                frame.layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+            return frame
         }
 
     val vlcLayout: VLCVideoLayout?

@@ -25,12 +25,22 @@ interface PlaybackEngine {
     fun attachVideoOutput(output: VideoOutputHost)
     fun detachVideoOutput()
     fun release()
+    
     fun updateViewportDiagnostics(
         containerWidth: Int,
         containerHeight: Int,
+        vlcLayoutWidth: Int,
+        vlcLayoutHeight: Int,
         isVideoSizeKnown: Boolean,
         lastViewportRect: String,
         scaleMode: VideoScaleMode
+    ) {}
+
+    fun updateViewSizes(
+        playerRootWidth: Int,
+        playerRootHeight: Int,
+        androidViewWidth: Int,
+        androidViewHeight: Int
     ) {}
 }
 
@@ -96,5 +106,15 @@ data class PlaybackDiagnostics(
     val lastMediaOpenTime: Long = 0L,
     val scaleMode: VideoScaleMode = VideoScaleMode.FIT,
     val isVideoSizeKnown: Boolean = false,
-    val lastViewportRect: String = ""
+    val lastViewportRect: String = "",
+    
+    // Real View Sizing dimensions for diagnostics
+    val playerRootWidth: Int = 0,
+    val playerRootHeight: Int = 0,
+    val androidViewWidth: Int = 0,
+    val androidViewHeight: Int = 0,
+    val videoHostWidth: Int = 0,
+    val videoHostHeight: Int = 0,
+    val vlcVideoLayoutWidth: Int = 0,
+    val vlcVideoLayoutHeight: Int = 0
 )

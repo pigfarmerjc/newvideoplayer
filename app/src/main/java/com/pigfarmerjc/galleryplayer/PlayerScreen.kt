@@ -12,7 +12,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,12 +22,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -117,6 +119,10 @@ fun PlayerScreen(
     // Safe Transition loading and timeout variables
     var isMediaLoading by remember(videoUri) { mutableStateOf(true) }
     var isPlaybackTimeout by remember(videoUri) { mutableStateOf(false) }
+
+    // Real-time View sizing diagnostics variables
+    var playerRootSize by remember { mutableStateOf(IntSize.Zero) }
+    var androidViewSize by remember { mutableStateOf(IntSize.Zero) }
 
     // Safe save helper
     val saveProgressAndStop = {
@@ -303,6 +309,15 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onGloballyPositioned { coordinates ->
+                playerRootSize = coordinates.size
+                playbackEngine.updateViewSizes(
+                    playerRootWidth = playerRootSize.width,
+                    playerRootHeight = playerRootSize.height,
+                    androidViewWidth = androidViewSize.width,
+                    androidViewHeight = androidViewSize.height
+                )
+            }
             .graphicsLayer {
                 // Apply translation downward displacement for reactive swipe down interaction
                 if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
@@ -320,7 +335,17 @@ fun PlayerScreen(
                 host.setVideoScaleMode(scaleMode)
                 host.view
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { coordinates ->
+                    androidViewSize = coordinates.size
+                    playbackEngine.updateViewSizes(
+                        playerRootWidth = playerRootSize.width,
+                        playerRootHeight = playerRootSize.height,
+                        androidViewWidth = androidViewSize.width,
+                        androidViewHeight = androidViewSize.height
+                    )
+                },
             onRelease = {
                 playbackEngine.detachVideoOutput()
                 videoHost?.dispose()
@@ -669,44 +694,32 @@ fun PlayerScreen(
                         onRepeatModeChange(nextMode)
                     }) {
                         val (icon, desc) = when (repeatMode) {
-                            PlaybackRepeatMode.NONE -> Icons.Filled.TrendingFlat to "Play Once"
+                            PlaybackRepeatMode.NONE -> Icons.AutoMirrored.Filled.TrendingFlat to "Play Once"
                             PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne to "Repeat One"
                             PlaybackRepeatMode.ALL -> Icons.Filled.Repeat to "Repeat All"
                         }
                         Icon(icon, contentDescription = desc, tint = Color.White)
                     }
 
-                    // Video Scale Mode Toggle
+                    // Video Scale Mode Toggle (Locked to Fit Experimental)
                     var scaleExpanded by remember { mutableStateOf(false) }
                     Box {
                         TextButton(onClick = { scaleExpanded = true }) {
                             Icon(Icons.Filled.AspectRatio, contentDescription = "Scale Mode", tint = Color.White, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            val scaleLabel = when (scaleMode) {
-                                VideoScaleMode.FIT -> stringResource(R.string.scale_fit)
-                                VideoScaleMode.FILL -> stringResource(R.string.scale_fill)
-                                VideoScaleMode.CENTER -> stringResource(R.string.scale_center)
-                            }
-                            Text(scaleLabel, color = Color.White)
+                            Text(stringResource(R.string.scale_fit) + " (实验)", color = Color.White)
                         }
                         DropdownMenu(
                             expanded = scaleExpanded,
                             onDismissRequest = { scaleExpanded = false }
                         ) {
-                            VideoScaleMode.values().forEach { mode ->
-                                val modeLabel = when (mode) {
-                                    VideoScaleMode.FIT -> stringResource(R.string.scale_fit)
-                                    VideoScaleMode.FILL -> stringResource(R.string.scale_fill)
-                                    VideoScaleMode.CENTER -> stringResource(R.string.scale_center)
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.scale_fit) + " (实验)") },
+                                onClick = {
+                                    onScaleModeChange(VideoScaleMode.FIT)
+                                    scaleExpanded = false
                                 }
-                                DropdownMenuItem(
-                                    text = { Text(modeLabel) },
-                                    onClick = {
-                                        onScaleModeChange(mode)
-                                        scaleExpanded = false
-                                    }
-                                )
-                            }
+                            )
                         }
                     }
                 }
@@ -788,12 +801,12 @@ fun PlayerScreen(
                                         "Playback Error: ${diagnostics.lastError}\n",
                                         "Playback State: ${playbackEngine.playbackState.value}\n",
                                         "Track Resolution: ${diagnostics.width}x${diagnostics.height} (Rot: ${diagnostics.rotation})\n",
-                                        "Viewport Container: ${diagnostics.containerWidth}x${diagnostics.containerHeight}\n",
+                                        "playerRoot Size: ${diagnostics.playerRootWidth}x${diagnostics.playerRootHeight}\n",
+                                        "androidView Size: ${diagnostics.androidViewWidth}x${diagnostics.androidViewHeight}\n",
+                                        "videoHost Size: ${diagnostics.videoHostWidth}x${diagnostics.videoHostHeight}\n",
+                                        "vlcVideoLayout Size: ${diagnostics.vlcVideoLayoutWidth}x${diagnostics.vlcVideoLayoutHeight}\n",
                                         "Surface Attached: ${diagnostics.surfaceAttached}\n",
-                                        "Last Viewport Rect: ${diagnostics.lastViewportRect}\n",
                                         "Scale Mode: ${diagnostics.scaleMode}\n",
-                                        "Video Size Known: ${diagnostics.isVideoSizeKnown}\n",
-                                        "Attach / Open Timestamps: ${diagnostics.lastVideoOutputAttachTime} / ${diagnostics.lastMediaOpenTime}\n",
                                         "Audio: ${diagnostics.sampleRate}Hz / ${diagnostics.channels}ch\n"
                                     ).toString()
                                     
@@ -869,12 +882,12 @@ fun PlayerScreen(
                                         "Playback Error: ${diagnostics.lastError}\n",
                                         "Playback State: ${playbackEngine.playbackState.value}\n",
                                         "Track Resolution: ${diagnostics.width}x${diagnostics.height} (Rot: ${diagnostics.rotation})\n",
-                                        "Viewport Container: ${diagnostics.containerWidth}x${diagnostics.containerHeight}\n",
+                                        "playerRoot Size: ${diagnostics.playerRootWidth}x${diagnostics.playerRootHeight}\n",
+                                        "androidView Size: ${diagnostics.androidViewWidth}x${diagnostics.androidViewHeight}\n",
+                                        "videoHost Size: ${diagnostics.videoHostWidth}x${diagnostics.videoHostHeight}\n",
+                                        "vlcVideoLayout Size: ${diagnostics.vlcVideoLayoutWidth}x${diagnostics.vlcVideoLayoutHeight}\n",
                                         "Surface Attached: ${diagnostics.surfaceAttached}\n",
-                                        "Last Viewport Rect: ${diagnostics.lastViewportRect}\n",
                                         "Scale Mode: ${diagnostics.scaleMode}\n",
-                                        "Video Size Known: ${diagnostics.isVideoSizeKnown}\n",
-                                        "Attach / Open Timestamps: ${diagnostics.lastVideoOutputAttachTime} / ${diagnostics.lastMediaOpenTime}\n",
                                         "Audio: ${diagnostics.sampleRate}Hz / ${diagnostics.channels}ch\n"
                                     ).toString()
                                     
