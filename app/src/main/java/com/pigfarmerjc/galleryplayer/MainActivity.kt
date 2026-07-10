@@ -442,11 +442,11 @@ class MainActivity : ComponentActivity() {
                         val photosGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
                         val currentScreen = screenStack.lastOrNull()
-                        val activePlayer = screenStack.firstOrNull { it is Screen.Player } as? Screen.Player
-                        val activeImageViewer = screenStack.firstOrNull { it is Screen.ImageViewer } as? Screen.ImageViewer
+                        val activePlayer = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
+                        val activeImageViewer = screenStack.lastOrNull { it is Screen.ImageViewer } as? Screen.ImageViewer
 
                         // Base screen is whatever was open below player/imageviewer
-                        val baseScreen = screenStack.firstOrNull { it is Screen.Home || it is Screen.FolderVideos } ?: Screen.Home
+                        val baseScreen = screenStack.lastOrNull { it is Screen.Home || it is Screen.FolderVideos } ?: Screen.Home
 
                         // Scroll position restoration when returning to Home
                         LaunchedEffect(currentScreen, viewModel.transitionState.lastOpenedVideoUri, viewModel.videoViewModeState, viewModel.videosList.size) {
