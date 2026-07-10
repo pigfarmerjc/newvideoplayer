@@ -3,14 +3,20 @@ package com.pigfarmerjc.galleryplayer
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,7 +34,12 @@ fun VideoGridScreen(
     onRefresh: () -> Unit,
     isLoading: Boolean,
     loadError: String?,
-    playbackProgressMap: Map<String, Float> = emptyMap()
+    playbackProgressMap: Map<String, Float> = emptyMap(),
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    sortMode: VideoSortMode,
+    onSortModeChange: (VideoSortMode) -> Unit,
+    continueWatchingVideos: List<LocalMediaItem>
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -36,6 +47,10 @@ fun VideoGridScreen(
     if (!hasPermission) {
         InlinePermissionRequest(permissionType = "video", onGranted = onRefresh)
         return
+    }
+
+    val filteredVideos = remember(videos, searchQuery, sortMode) {
+        VideoFilterAndSort.filterAndSort(videos, searchQuery, sortMode)
     }
 
     if (isLoading && videos.isEmpty()) {
@@ -86,54 +101,159 @@ fun VideoGridScreen(
         return
     }
 
-    if (videos.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenWidth = configuration.screenWidthDp
+
+    val columns = when {
+        screenWidth >= 600 -> if (isLandscape) 6 else 4
+        else -> if (isLandscape) 3 else 2
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize().weight(1f)
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "No local videos found",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = "Add videos to your device and refresh",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Refresh")
+            // Header: Search & Sort
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Search Input
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        placeholder = { Text("Search videos or folders...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchQueryChange("") }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp)
+                    )
+
+                    // Sort menu header row
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Videos (${filteredVideos.size})",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+
+                        Box {
+                            var sortExpanded by remember { mutableStateOf(false) }
+                            TextButton(onClick = { sortExpanded = true }) {
+                                Icon(Icons.Default.Sort, contentDescription = "Sort")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                val label = when (sortMode) {
+                                    VideoSortMode.DATE_MODIFIED_DESC -> "Recently Modified"
+                                    VideoSortMode.NAME_ASC -> "Name A-Z"
+                                    VideoSortMode.NAME_DESC -> "Name Z-A"
+                                    VideoSortMode.DURATION_DESC -> "Duration (Long)"
+                                    VideoSortMode.DURATION_ASC -> "Duration (Short)"
+                                    VideoSortMode.SIZE_DESC -> "Size (Large)"
+                                    VideoSortMode.SIZE_ASC -> "Size (Small)"
+                                }
+                                Text(label)
+                            }
+                            DropdownMenu(
+                                expanded = sortExpanded,
+                                onDismissRequest = { sortExpanded = false }
+                            ) {
+                                VideoSortMode.values().forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            val text = when (mode) {
+                                                VideoSortMode.DATE_MODIFIED_DESC -> "Recently Modified"
+                                                VideoSortMode.NAME_ASC -> "Name A-Z"
+                                                VideoSortMode.NAME_DESC -> "Name Z-A"
+                                                VideoSortMode.DURATION_DESC -> "Duration (Long)"
+                                                VideoSortMode.DURATION_ASC -> "Duration (Short)"
+                                                VideoSortMode.SIZE_DESC -> "Size (Large)"
+                                                VideoSortMode.SIZE_ASC -> "Size (Small)"
+                                            }
+                                            Text(text)
+                                        },
+                                        onClick = {
+                                            onSortModeChange(mode)
+                                            sortExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        }
-    } else {
-        val configuration = LocalConfiguration.current
-        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val screenWidth = configuration.screenWidthDp
 
-        val columns = when {
-            screenWidth >= 600 -> if (isLandscape) 6 else 4
-            else -> if (isLandscape) 3 else 2
-        }
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            // Continue Watching carousel row
+            if (continueWatchingVideos.isNotEmpty() && searchQuery.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Continue Watching",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(continueWatchingVideos) { video ->
+                                val progressRatio = playbackProgressMap[video.contentUri]
+                                ContinueWatchingCard(
+                                    video = video,
+                                    progressRatio = progressRatio,
+                                    onClick = { onVideoClick(video, videos) }
+                                )
+                            }
+                        }
+                    }
+                }
             }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize().weight(1f)
-            ) {
-                items(videos) { video ->
+
+            // Empty state or main items grid
+            if (filteredVideos.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "No matching videos found",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(filteredVideos) { video ->
                     VideoCard(
                         video = video,
                         progressRatio = playbackProgressMap[video.contentUri],
@@ -141,6 +261,56 @@ fun VideoGridScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ContinueWatchingCard(
+    video: LocalMediaItem,
+    progressRatio: Float?,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+            ) {
+                MediaThumbnail(
+                    contentUri = video.contentUri,
+                    mediaType = MediaType.VIDEO,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Overlay active linear progress indicator at the bottom of the thumbnail
+                if (progressRatio != null && progressRatio in 0.01f..0.99f) {
+                    LinearProgressIndicator(
+                        progress = { progressRatio },
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(3.dp)
+                    )
+                }
+            }
+            Text(
+                text = video.displayName,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(6.dp)
+            )
         }
     }
 }

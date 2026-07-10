@@ -25,7 +25,14 @@ fun HomeScreen(
     defaultSpeed: Float,
     skipSeconds: Int,
     onDefaultSpeedChange: (Float) -> Unit,
-    onSkipSecondsChange: (Int) -> Unit
+    onSkipSecondsChange: (Int) -> Unit,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    videoSortMode: VideoSortMode,
+    onVideoSortModeChange: (VideoSortMode) -> Unit,
+    folderSortMode: FolderSortMode,
+    onFolderSortModeChange: (FolderSortMode) -> Unit,
+    continueWatchingVideos: List<LocalMediaItem>
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -74,7 +81,12 @@ fun HomeScreen(
                         onRefresh = onReload,
                         isLoading = isLoadingMedia,
                         loadError = mediaLoadError,
-                        playbackProgressMap = playbackProgressMap
+                        playbackProgressMap = playbackProgressMap,
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = onSearchQueryChange,
+                        sortMode = videoSortMode,
+                        onSortModeChange = onVideoSortModeChange,
+                        continueWatchingVideos = continueWatchingVideos
                     )
                 }
                 HomeTab.FOLDERS -> {
@@ -83,7 +95,10 @@ fun HomeScreen(
                         onFolderClick = onFolderClick,
                         onRefresh = onReload,
                         isLoading = isLoadingMedia,
-                        loadError = mediaLoadError
+                        loadError = mediaLoadError,
+                        sortMode = folderSortMode,
+                        onSortModeChange = onFolderSortModeChange,
+                        videos = videos
                     )
                 }
                 HomeTab.IMAGES -> {

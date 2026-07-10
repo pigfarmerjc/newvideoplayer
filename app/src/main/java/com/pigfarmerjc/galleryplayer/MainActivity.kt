@@ -97,14 +97,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var defaultSpeed by mutableStateOf(1.0f)
     var skipSeconds by mutableStateOf(10)
 
+    // Library search & sort states
+    var searchQuery by mutableStateOf("")
+    var videoSortMode by mutableStateOf(VideoSortMode.DATE_MODIFIED_DESC)
+    var folderSortMode by mutableStateOf(FolderSortMode.VIDEO_COUNT_DESC)
+    var repeatModeState by mutableStateOf(PlaybackRepeatMode.NONE)
+
+    val historyListState = mutableStateOf<List<com.pigfarmerjc.galleryplayer.core.database.repository.PlaybackHistoryItem>>(emptyList())
+
+    val continueWatchingList = derivedStateOf {
+        val activeUris = playbackProgressMap.value.keys
+        historyListState.value
+            .filter { it.contentUri in activeUris && !it.finished }
+            .mapNotNull { historyItem ->
+                videosList.find { it.contentUri == historyItem.contentUri }
+            }
+            .take(10)
+    }
+
     init {
         val sharedPrefs = application.getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
         defaultSpeed = sharedPrefs.getFloat("default_speed", 1.0f)
         skipSeconds = sharedPrefs.getInt("skip_seconds", 10)
 
+        val sortPrefs = application.getSharedPreferences("library_sort_settings", android.content.Context.MODE_PRIVATE)
+        videoSortMode = VideoSortMode.valueOf(sortPrefs.getString("video_sort_mode", VideoSortMode.DATE_MODIFIED_DESC.name) ?: VideoSortMode.DATE_MODIFIED_DESC.name)
+        folderSortMode = FolderSortMode.valueOf(sortPrefs.getString("folder_sort_mode", FolderSortMode.VIDEO_COUNT_DESC.name) ?: FolderSortMode.VIDEO_COUNT_DESC.name)
+
+        val playbackPrefs = application.getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
+        repeatModeState = PlaybackRepeatMode.valueOf(playbackPrefs.getString("repeat_mode", PlaybackRepeatMode.NONE.name) ?: PlaybackRepeatMode.NONE.name)
+
         // Stream playback history changes to the progress map
         viewModelScope.launch {
             historyRepository.getHistory().collect { list ->
+                historyListState.value = list
                 val map = mutableMapOf<String, Float>()
                 list.forEach { item ->
                     if (item.durationMs > 0 && !item.finished) {
@@ -129,6 +155,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         skipSeconds = seconds
         getApplication<Application>().getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
             .edit().putInt("skip_seconds", seconds).apply()
+    }
+
+    fun updateVideoSortMode(mode: VideoSortMode) {
+        videoSortMode = mode
+        getApplication<Application>().getSharedPreferences("library_sort_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("video_sort_mode", mode.name).apply()
+    }
+
+    fun updateFolderSortMode(mode: FolderSortMode) {
+        folderSortMode = mode
+        getApplication<Application>().getSharedPreferences("library_sort_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("folder_sort_mode", mode.name).apply()
+    }
+
+    fun updateRepeatMode(mode: PlaybackRepeatMode) {
+        repeatModeState = mode
+        getApplication<Application>().getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("repeat_mode", mode.name).apply()
     }
 
     fun startPlaybackSession(video: LocalMediaItem) {
@@ -321,7 +365,14 @@ class MainActivity : ComponentActivity() {
                                     defaultSpeed = viewModel.defaultSpeed,
                                     skipSeconds = viewModel.skipSeconds,
                                     onDefaultSpeedChange = { viewModel.updateDefaultSpeed(it) },
-                                    onSkipSecondsChange = { viewModel.updateSkipSeconds(it) }
+                                    onSkipSecondsChange = { viewModel.updateSkipSeconds(it) },
+                                    searchQuery = viewModel.searchQuery,
+                                    onSearchQueryChange = { viewModel.searchQuery = it },
+                                    videoSortMode = viewModel.videoSortMode,
+                                    onVideoSortModeChange = { viewModel.updateVideoSortMode(it) },
+                                    folderSortMode = viewModel.folderSortMode,
+                                    onFolderSortModeChange = { viewModel.updateFolderSortMode(it) },
+                                    continueWatchingVideos = viewModel.continueWatchingList.value
                                 )
                             }
                             is Screen.FolderVideos -> {
@@ -367,7 +418,12 @@ class MainActivity : ComponentActivity() {
                                             onRefresh = { viewModel.refreshLocalMedia(context) },
                                             isLoading = viewModel.isLoadingMedia,
                                             loadError = viewModel.mediaLoadError,
-                                            playbackProgressMap = viewModel.playbackProgressMap.value
+                                            playbackProgressMap = viewModel.playbackProgressMap.value,
+                                            searchQuery = viewModel.searchQuery,
+                                            onSearchQueryChange = { viewModel.searchQuery = it },
+                                            sortMode = viewModel.videoSortMode,
+                                            onSortModeChange = { viewModel.updateVideoSortMode(it) },
+                                            continueWatchingVideos = emptyList()
                                         )
                                     }
                                 }
@@ -418,7 +474,9 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     defaultSpeed = viewModel.defaultSpeed,
-                                    skipSeconds = viewModel.skipSeconds
+                                    skipSeconds = viewModel.skipSeconds,
+                                    repeatMode = viewModel.repeatModeState,
+                                    onRepeatModeChange = { viewModel.updateRepeatMode(it) }
                                 )
                             }
                             is Screen.ImageViewer -> {
