@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,12 +21,52 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pigfarmerjc.galleryplayer.core.database.GalleryDatabase
+import com.pigfarmerjc.galleryplayer.core.database.repository.RoomMediaRepository
+import com.pigfarmerjc.galleryplayer.core.database.repository.RoomPlaybackHistoryRepository
+import com.pigfarmerjc.galleryplayer.core.model.ScanState
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackState
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcPlaybackEngine
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+fun LocalMediaItem.toMediaItem(): com.pigfarmerjc.galleryplayer.core.model.MediaItem {
+    return com.pigfarmerjc.galleryplayer.core.model.MediaItem(
+        databaseId = 0L,
+        contentUri = this.contentUri,
+        mediaType = this.mediaType,
+        volumeName = this.volumeName,
+        mediaStoreId = this.mediaStoreId,
+        relativePath = this.relativePath,
+        displayName = this.displayName,
+        mimeType = this.mimeType,
+        fileSize = this.fileSize,
+        durationMs = this.durationMs,
+        width = this.width,
+        height = this.height,
+        rotationDegrees = null,
+        dateAddedEpochSeconds = null,
+        dateModifiedEpochSeconds = this.dateModifiedEpochSeconds,
+        dateTakenEpochMillis = null,
+        videoCodec = null,
+        audioCodec = null,
+        audioSampleFormat = null,
+        audioSampleRate = null,
+        audioChannels = null,
+        frameRate = null,
+        bitrate = null,
+        isHdr = false,
+        isGif = this.isGif,
+        isFavorite = false,
+        isHidden = false,
+        scanState = ScanState.SCANNED,
+        lastError = null
+    )
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playbackEngine: PlaybackEngine = LibVlcPlaybackEngine(application)
@@ -44,6 +83,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var isLoadingMedia by mutableStateOf(false)
     var mediaLoadError by mutableStateOf<String?>(null)
     var mediaRepositoryCount by mutableStateOf(0)
+
+    // DB Repositories
+    private val database by lazy { GalleryDatabase.getDatabase(application) }
+    private val mediaRepository by lazy { RoomMediaRepository(database.mediaItemDao(), database.folderDao()) }
+    private val historyRepository by lazy { RoomPlaybackHistoryRepository(database.playbackHistoryDao(), database.mediaItemDao()) }
+
+    // Playback progress map: contentUri -> progressRatio (0.01 to 0.99)
+    private val _playbackProgressMap = mutableStateOf<Map<String, Float>>(emptyMap())
+    val playbackProgressMap: State<Map<String, Float>> get() = _playbackProgressMap
+
+    init {
+        // Stream playback history changes to the progress map
+        viewModelScope.launch {
+            historyRepository.getHistory().collect { list ->
+                val map = mutableMapOf<String, Float>()
+                list.forEach { item ->
+                    if (item.durationMs > 0 && !item.finished) {
+                        val progress = item.playbackPositionMs.toFloat() / item.durationMs.toFloat()
+                        if (progress in 0.01f..0.99f) {
+                            map[item.contentUri] = progress
+                        }
+                    }
+                }
+                _playbackProgressMap.value = map
+            }
+        }
+    }
+
+    fun startPlaybackSession(video: LocalMediaItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // First persist media item to prevent FK violation
+            val domainItem = video.toMediaItem()
+            mediaRepository.saveMediaItems(listOf(domainItem))
+            // Start history session
+            historyRepository.startPlaybackSession(video.contentUri)
+        }
+    }
+
+    fun updatePlaybackProgress(video: LocalMediaItem, positionMs: Long, durationMs: Long, speed: Float) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val domainItem = video.toMediaItem()
+            mediaRepository.saveMediaItems(listOf(domainItem))
+            historyRepository.updatePlaybackProgress(video.contentUri, positionMs, durationMs, speed)
+        }
+    }
+
+    fun markPlaybackCompleted(video: LocalMediaItem, durationMs: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val domainItem = video.toMediaItem()
+            mediaRepository.saveMediaItems(listOf(domainItem))
+            historyRepository.markPlaybackCompleted(video.contentUri, durationMs)
+        }
+    }
+
+    suspend fun getResumePlaybackPosition(contentUri: String): Long = withContext(Dispatchers.IO) {
+        val item = database.mediaItemDao().getByUri(contentUri) ?: return@withContext 0L
+        val history = database.playbackHistoryDao().getByMediaId(item.id)
+        if (history != null && !history.completed) {
+            val pos = history.positionMs
+            val dur = history.durationMs
+            if (pos > 3000L && dur > 0L && pos < dur * 0.90) {
+                return@withContext pos
+            }
+        }
+        return@withContext 0L
+    }
 
     fun refreshLocalMedia(context: android.content.Context) {
         viewModelScope.launch {
@@ -107,6 +212,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val viewModel: MainViewModel = viewModel()
             val context = LocalContext.current
+            val scope = rememberCoroutineScope()
 
             // Check permissions and load media on startup
             LaunchedEffect(Unit) {
@@ -153,14 +259,21 @@ class MainActivity : ComponentActivity() {
                                     images = viewModel.imagesList,
                                     folders = viewModel.foldersList,
                                     onVideoClick = { video, list ->
-                                        screenStack.add(
-                                            Screen.Player(
-                                                videoUri = video.contentUri,
-                                                videoTitle = video.displayName,
-                                                videoList = list,
-                                                currentIndex = list.indexOf(video)
+                                        scope.launch {
+                                            val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
+                                            if (resumePos > 0L) {
+                                                android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                            screenStack.add(
+                                                Screen.Player(
+                                                    videoUri = video.contentUri,
+                                                    videoTitle = video.displayName,
+                                                    videoList = list,
+                                                    currentIndex = list.indexOf(video),
+                                                    initialPositionMs = resumePos
+                                                )
                                             )
-                                        )
+                                        }
                                     },
                                     onFolderClick = { folder ->
                                         screenStack.add(
@@ -183,7 +296,8 @@ class MainActivity : ComponentActivity() {
                                     mediaRepositoryCount = viewModel.mediaRepositoryCount,
                                     playbackEngine = viewModel.playbackEngine,
                                     isLoadingMedia = viewModel.isLoadingMedia,
-                                    mediaLoadError = viewModel.mediaLoadError
+                                    mediaLoadError = viewModel.mediaLoadError,
+                                    playbackProgressMap = viewModel.playbackProgressMap.value
                                 )
                             }
                             is Screen.FolderVideos -> {
@@ -210,18 +324,26 @@ class MainActivity : ComponentActivity() {
                                         VideoGridScreen(
                                             videos = folderVideos,
                                             onVideoClick = { video, list ->
-                                                screenStack.add(
-                                                    Screen.Player(
-                                                        videoUri = video.contentUri,
-                                                        videoTitle = video.displayName,
-                                                        videoList = list,
-                                                        currentIndex = list.indexOf(video)
+                                                scope.launch {
+                                                    val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
+                                                    if (resumePos > 0L) {
+                                                        android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    screenStack.add(
+                                                        Screen.Player(
+                                                            videoUri = video.contentUri,
+                                                            videoTitle = video.displayName,
+                                                            videoList = list,
+                                                            currentIndex = list.indexOf(video),
+                                                            initialPositionMs = resumePos
+                                                        )
                                                     )
-                                                )
+                                                }
                                             },
                                             onRefresh = { viewModel.refreshLocalMedia(context) },
                                             isLoading = viewModel.isLoadingMedia,
-                                            loadError = viewModel.mediaLoadError
+                                            loadError = viewModel.mediaLoadError,
+                                            playbackProgressMap = viewModel.playbackProgressMap.value
                                         )
                                     }
                                 }
@@ -238,16 +360,39 @@ class MainActivity : ComponentActivity() {
                                     playbackEngine = viewModel.playbackEngine,
                                     videoOutputFactory = viewModel.videoOutputFactory,
                                     onChangeVideo = { newIndex ->
-                                        // Update parent navigation state stack
                                         val newItem = currentScreen.videoList[newIndex]
-                                        screenStack[screenStack.lastIndex] = Screen.Player(
-                                            videoUri = newItem.contentUri,
-                                            videoTitle = newItem.displayName,
-                                            videoList = currentScreen.videoList,
-                                            currentIndex = newIndex
-                                        )
+                                        scope.launch {
+                                            val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
+                                            if (resumePos > 0L) {
+                                                android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                            screenStack[screenStack.lastIndex] = Screen.Player(
+                                                videoUri = newItem.contentUri,
+                                                videoTitle = newItem.displayName,
+                                                videoList = currentScreen.videoList,
+                                                currentIndex = newIndex,
+                                                initialPositionMs = resumePos
+                                            )
+                                        }
                                     },
-                                    onBack = { screenStack.removeAt(screenStack.lastIndex) }
+                                    onBack = { screenStack.removeAt(screenStack.lastIndex) },
+                                    initialPositionMs = currentScreen.initialPositionMs,
+                                    onPlaybackSessionStart = {
+                                        viewModel.startPlaybackSession(currentScreen.videoList[currentScreen.currentIndex])
+                                    },
+                                    onPlaybackProgress = { pos, dur, completed ->
+                                        val currentVideo = currentScreen.videoList[currentScreen.currentIndex]
+                                        if (completed) {
+                                            viewModel.markPlaybackCompleted(currentVideo, dur)
+                                        } else {
+                                            viewModel.updatePlaybackProgress(
+                                                currentVideo,
+                                                pos,
+                                                dur,
+                                                viewModel.playbackEngine.playbackSpeed.value
+                                            )
+                                        }
+                                    }
                                 )
                             }
                             is Screen.ImageViewer -> {

@@ -27,7 +27,8 @@ fun VideoGridScreen(
     onVideoClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit,
     onRefresh: () -> Unit,
     isLoading: Boolean,
-    loadError: String?
+    loadError: String?,
+    playbackProgressMap: Map<String, Float> = emptyMap()
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -135,6 +136,7 @@ fun VideoGridScreen(
                 items(videos) { video ->
                     VideoCard(
                         video = video,
+                        progressRatio = playbackProgressMap[video.contentUri],
                         onClick = { onVideoClick(video, videos) }
                     )
                 }
@@ -146,21 +148,22 @@ fun VideoGridScreen(
 @Composable
 fun VideoCard(
     video: LocalMediaItem,
+    progressRatio: Float?,
     onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
     ) {
         Column {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1.6f)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
             ) {
                 MediaThumbnail(
                     contentUri = video.contentUri,
@@ -184,11 +187,24 @@ fun VideoCard(
                         )
                     }
                 }
+
+                // Overlay active linear progress indicator at the bottom of the thumbnail
+                if (progressRatio != null && progressRatio in 0.01f..0.99f) {
+                    LinearProgressIndicator(
+                        progress = { progressRatio },
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(3.dp)
+                    )
+                }
             }
 
             Column(
                 modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
                     text = video.displayName,
@@ -199,16 +215,23 @@ fun VideoCard(
                 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     val folderName = video.relativePath.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
-                    Text(
-                        text = folderName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = folderName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     
                     if (video.width != null && video.height != null) {
                         Text(

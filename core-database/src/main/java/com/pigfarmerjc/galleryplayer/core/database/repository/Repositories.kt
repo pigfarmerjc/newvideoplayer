@@ -107,6 +107,9 @@ interface PlaybackHistoryRepository {
     fun getHistory(): Flow<List<PlaybackHistoryItem>>
     suspend fun saveHistory(contentUri: String, positionMs: Long, durationMs: Long, finished: Boolean)
     suspend fun deleteHistory(contentUri: String)
+    suspend fun startPlaybackSession(contentUri: String)
+    suspend fun updatePlaybackProgress(contentUri: String, positionMs: Long, durationMs: Long, preferredSpeed: Float)
+    suspend fun markPlaybackCompleted(contentUri: String, durationMs: Long)
 }
 
 // Room database repository implementations
@@ -214,5 +217,67 @@ class RoomPlaybackHistoryRepository(
 
     override suspend fun deleteHistory(contentUri: String) {
         playbackHistoryDao.deleteByUri(contentUri)
+    }
+
+    override suspend fun startPlaybackSession(contentUri: String) {
+        val mediaItem = mediaItemDao.getByUri(contentUri) ?: return
+        val existing = playbackHistoryDao.getByMediaId(mediaItem.id)
+        val newPlayCount = if (existing != null) existing.playCount + 1 else 1
+
+        val history = PlaybackHistoryEntity(
+            mediaId = mediaItem.id,
+            positionMs = existing?.positionMs ?: 0L,
+            durationMs = existing?.durationMs ?: 0L,
+            lastPlayedAt = System.currentTimeMillis(),
+            completed = existing?.completed ?: false,
+            playCount = newPlayCount,
+            preferredSpeed = existing?.preferredSpeed ?: 1.0f
+        )
+        playbackHistoryDao.upsert(history)
+    }
+
+    override suspend fun updatePlaybackProgress(
+        contentUri: String,
+        positionMs: Long,
+        durationMs: Long,
+        preferredSpeed: Float
+    ) {
+        val mediaItem = mediaItemDao.getByUri(contentUri) ?: return
+        val existing = playbackHistoryDao.getByMediaId(mediaItem.id)
+
+        val calculatedCompleted = if (durationMs > 0) {
+            (positionMs.toDouble() / durationMs.toDouble()) >= COMPLETION_THRESHOLD
+        } else {
+            false
+        }
+
+        val finalPosition = if (positionMs < 3000L) 0L else positionMs
+
+        val history = PlaybackHistoryEntity(
+            mediaId = mediaItem.id,
+            positionMs = finalPosition,
+            durationMs = durationMs,
+            lastPlayedAt = System.currentTimeMillis(),
+            completed = calculatedCompleted,
+            playCount = existing?.playCount ?: 1,
+            preferredSpeed = preferredSpeed
+        )
+        playbackHistoryDao.upsert(history)
+    }
+
+    override suspend fun markPlaybackCompleted(contentUri: String, durationMs: Long) {
+        val mediaItem = mediaItemDao.getByUri(contentUri) ?: return
+        val existing = playbackHistoryDao.getByMediaId(mediaItem.id)
+
+        val history = PlaybackHistoryEntity(
+            mediaId = mediaItem.id,
+            positionMs = durationMs,
+            durationMs = durationMs,
+            lastPlayedAt = System.currentTimeMillis(),
+            completed = true,
+            playCount = existing?.playCount ?: 1,
+            preferredSpeed = existing?.preferredSpeed ?: 1.0f
+        )
+        playbackHistoryDao.upsert(history)
     }
 }

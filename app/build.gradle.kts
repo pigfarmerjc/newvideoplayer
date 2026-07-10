@@ -50,6 +50,8 @@ dependencies {
     implementation(project(":core-model"))
     implementation(project(":core-database"))
     implementation(project(":core-storage"))
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)

@@ -20,7 +20,8 @@ fun HomeScreen(
     mediaRepositoryCount: Int,
     playbackEngine: com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine,
     isLoadingMedia: Boolean,
-    mediaLoadError: String?
+    mediaLoadError: String?,
+    playbackProgressMap: Map<String, Float>
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -68,7 +69,8 @@ fun HomeScreen(
                         onVideoClick = onVideoClick,
                         onRefresh = onReload,
                         isLoading = isLoadingMedia,
-                        loadError = mediaLoadError
+                        loadError = mediaLoadError,
+                        playbackProgressMap = playbackProgressMap
                     )
                 }
                 HomeTab.FOLDERS -> {

@@ -29,7 +29,10 @@ fun PlayerScreen(
     playbackEngine: PlaybackEngine,
     videoOutputFactory: VideoOutputHostFactory,
     onChangeVideo: (Int) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    initialPositionMs: Long,
+    onPlaybackProgress: (positionMs: Long, durationMs: Long, completed: Boolean) -> Unit,
+    onPlaybackSessionStart: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     
@@ -50,6 +53,9 @@ fun PlayerScreen(
     // Keep track of the active video output host
     var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
 
+    // Prevent multiple initial seeks
+    var hasAppliedInitialSeek by remember(videoUri) { mutableStateOf(false) }
+
     // Intercept hardware back button
     BackHandler {
         playbackEngine.stop()
@@ -69,6 +75,50 @@ fun PlayerScreen(
         val host = videoHost
         if (host != null) {
             playbackEngine.open(android.net.Uri.parse(videoUri))
+        }
+    }
+
+    // Apply initial position seek restoration
+    LaunchedEffect(state, duration, isSeekable) {
+        if (initialPositionMs > 0 && !hasAppliedInitialSeek && duration > 0 && isSeekable) {
+            playbackEngine.seekTo(initialPositionMs)
+            hasAppliedInitialSeek = true
+        }
+    }
+
+    // Periodically save progress every 5 seconds, and notify on play session start
+    LaunchedEffect(videoUri, state) {
+        if (state == PlaybackState.Playing) {
+            onPlaybackSessionStart()
+            
+            while (true) {
+                delay(5000)
+                val currentPos = playbackEngine.positionMs.value
+                val dur = playbackEngine.durationMs.value
+                if (dur > 0) {
+                    val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                    onPlaybackProgress(currentPos, dur, isFinished)
+                }
+            }
+        } else if (state == PlaybackState.Paused) {
+            val currentPos = playbackEngine.positionMs.value
+            val dur = playbackEngine.durationMs.value
+            if (dur > 0) {
+                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                onPlaybackProgress(currentPos, dur, isFinished)
+            }
+        }
+    }
+
+    // Save final progress when exit/dispose
+    DisposableEffect(videoUri) {
+        onDispose {
+            val currentPos = playbackEngine.positionMs.value
+            val dur = playbackEngine.durationMs.value
+            if (dur > 0) {
+                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                onPlaybackProgress(currentPos, dur, isFinished)
+            }
         }
     }
 

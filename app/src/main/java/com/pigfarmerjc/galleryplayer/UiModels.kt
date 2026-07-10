@@ -15,7 +15,8 @@ sealed class Screen {
         val videoUri: String,
         val videoTitle: String,
         val videoList: List<LocalMediaItem> = emptyList(),
-        val currentIndex: Int = 0
+        val currentIndex: Int = 0,
+        val initialPositionMs: Long = 0
     ) : Screen()
     
     data class ImageViewer(
@@ -43,7 +44,8 @@ data class LocalMediaItem(
     val width: Int?,
     val height: Int?,
     val dateModifiedEpochSeconds: Long?,
-    val isGif: Boolean
+    val isGif: Boolean,
+    val mediaStoreId: Long?
 )
 
 data class FolderItem(

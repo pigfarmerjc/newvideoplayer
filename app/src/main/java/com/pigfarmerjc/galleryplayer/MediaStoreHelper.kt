@@ -68,7 +68,8 @@ object MediaStoreHelper {
                         width = if (wVal > 0) wVal else null,
                         height = if (hVal > 0) hVal else null,
                         dateModifiedEpochSeconds = modVal,
-                        isGif = false
+                        isGif = false,
+                        mediaStoreId = idVal
                     )
                 )
             }
@@ -131,7 +132,8 @@ object MediaStoreHelper {
                         width = if (wVal > 0) wVal else null,
                         height = if (hVal > 0) hVal else null,
                         dateModifiedEpochSeconds = modVal,
-                        isGif = isGif
+                        isGif = isGif,
+                        mediaStoreId = idVal
                     )
                 )
             }
