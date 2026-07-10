@@ -50,7 +50,12 @@ fun HomeScreen(
     videoViewMode: VideoViewMode,
     onVideoViewModeChange: (VideoViewMode) -> Unit,
     photosGridColumns: Int,
-    onPhotosGridColumnsChange: (Int) -> Unit
+    onPhotosGridColumnsChange: (Int) -> Unit,
+    photosGridSpacing: Float,
+    onPhotosGridSpacingChange: (Float) -> Unit,
+    cardGridState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    photosGridState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    transitionState: GalleryTransitionState
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -104,11 +109,14 @@ fun HomeScreen(
                         onSearchQueryChange = onSearchQueryChange,
                         sortMode = videoSortMode,
                         onSortModeChange = onVideoSortModeChange,
-                        continueWatchingVideos = continueWatchingVideos,
                         videoViewMode = videoViewMode,
                         onVideoViewModeChange = onVideoViewModeChange,
                         photosGridColumns = photosGridColumns,
-                        onPhotosGridColumnsChange = onPhotosGridColumnsChange
+                        onPhotosGridColumnsChange = onPhotosGridColumnsChange,
+                        photosGapDp = photosGridSpacing.dp,
+                        cardGridState = cardGridState,
+                        photosGridState = photosGridState,
+                        transitionState = transitionState
                     )
                 }
                 HomeTab.FOLDERS -> {
@@ -159,7 +167,9 @@ fun HomeScreen(
                         videoViewMode = videoViewMode,
                         onVideoViewModeChange = onVideoViewModeChange,
                         photosGridColumns = photosGridColumns,
-                        onPhotosGridColumnsChange = onPhotosGridColumnsChange
+                        onPhotosGridColumnsChange = onPhotosGridColumnsChange,
+                        photosGridSpacing = photosGridSpacing,
+                        onPhotosGridSpacingChange = onPhotosGridSpacingChange
                     )
                 }
             }

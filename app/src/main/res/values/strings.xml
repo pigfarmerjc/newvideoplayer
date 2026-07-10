@@ -92,4 +92,9 @@
     <string name="default_video_view_mode_desc">Configure standard view mode layout for Videos tab</string>
     <string name="photos_grid_columns_setting">Photos Grid Columns</string>
     <string name="photos_grid_columns_setting_desc">Adjust the number of columns in Photos Grid layout</string>
+    <string name="photos_grid_spacing">Photos Grid Spacing</string>
+    <string name="photos_grid_spacing_desc">Gap between cells in Photos Grid mode</string>
+    <string name="spacing_1dp">1dp (Dense)</string>
+    <string name="spacing_2dp">2dp (Comfortable)</string>
+    <string name="spacing_4dp">4dp (Spacious)</string>
 </resources>

@@ -32,6 +32,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.draw.clip
+import com.pigfarmerjc.galleryplayer.core.model.MediaType
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -68,7 +70,8 @@ fun PlayerScreen(
     repeatMode: PlaybackRepeatMode,
     onRepeatModeChange: (PlaybackRepeatMode) -> Unit,
     scaleMode: VideoScaleMode,
-    onScaleModeChange: (VideoScaleMode) -> Unit
+    onScaleModeChange: (VideoScaleMode) -> Unit,
+    initialBounds: MediaItemBounds? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -98,6 +101,9 @@ fun PlayerScreen(
 
     // Protect playCount increment from pausing/resuming repeatedly
     var hasStartedSession by remember(videoUri) { mutableStateOf(false) }
+
+    val transitionProgress = remember { Animatable(0f) }
+    var lastScrubSeekTime by remember { mutableStateOf(0L) }
 
     // Drag gesture tracking states
     var dragOffsetX by remember { mutableStateOf(0f) }
@@ -133,6 +139,14 @@ fun PlayerScreen(
             onPlaybackProgress(currentPos, dur, isFinished)
         }
         playbackEngine.stop()
+    }
+
+    val performDismiss = {
+        coroutineScope.launch {
+            saveProgressAndStop()
+            transitionProgress.animateTo(0f, androidx.compose.animation.core.tween(250))
+            onBack()
+        }
     }
 
     val triggerVideoChange: (Int) -> Unit = { newIndex ->
@@ -203,8 +217,7 @@ fun PlayerScreen(
 
     // Intercept hardware back button
     BackHandler {
-        saveProgressAndStop()
-        onBack()
+        performDismiss()
     }
 
     // Auto-hide controls after 3 seconds of inactivity
@@ -276,19 +289,23 @@ fun PlayerScreen(
             
             while (true) {
                 delay(5000)
+                if (!isDragging) {
+                    val currentPos = playbackEngine.positionMs.value
+                    val dur = playbackEngine.durationMs.value
+                    if (dur > 0) {
+                        val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                        onPlaybackProgress(currentPos, dur, isFinished)
+                    }
+                }
+            }
+        } else if (state == PlaybackState.Paused) {
+            if (!isDragging) {
                 val currentPos = playbackEngine.positionMs.value
                 val dur = playbackEngine.durationMs.value
                 if (dur > 0) {
                     val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
                     onPlaybackProgress(currentPos, dur, isFinished)
                 }
-            }
-        } else if (state == PlaybackState.Paused) {
-            val currentPos = playbackEngine.positionMs.value
-            val dur = playbackEngine.durationMs.value
-            if (dur > 0) {
-                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
-                onPlaybackProgress(currentPos, dur, isFinished)
             }
         }
     }
@@ -305,10 +322,49 @@ fun PlayerScreen(
         }
     }
 
+    // Open/Close transition calculations
+    val rootWidth = playerRootSize.width.toFloat()
+    val rootHeight = playerRootSize.height.toFloat()
+    val progress = transitionProgress.value
+
+    // Animation progress snapped/lerped
+    val baseScaleX = if (initialBounds != null && rootWidth > 0f) {
+        initialBounds.width / rootWidth + (1f - initialBounds.width / rootWidth) * progress
+    } else progress
+
+    val baseScaleY = if (initialBounds != null && rootHeight > 0f) {
+        initialBounds.height / rootHeight + (1f - initialBounds.height / rootHeight) * progress
+    } else progress
+
+    val baseTransX = if (initialBounds != null && rootWidth > 0f) {
+        initialBounds.left * (1f - progress)
+    } else 0f
+
+    val baseTransY = if (initialBounds != null && rootHeight > 0f) {
+        initialBounds.top * (1f - progress)
+    } else 0f
+
+    // Dismiss gesture progress
+    val dragProgress = if (verticalThresholdPx > 0f) (dragOffsetY / verticalThresholdPx).coerceIn(0f, 1f) else 0f
+    val dismissScale = dismissProgressToScale(dragProgress, 0.75f)
+    val dismissCornerDp = dismissProgressToCornerDp(dragProgress, 16f)
+    val dimAlpha = progress * dismissProgressToDimAlpha(dragProgress)
+
+    val finalScaleX = baseScaleX * dismissScale
+    val finalScaleY = baseScaleY * dismissScale
+    val finalTransX = baseTransX + swipeOffset.value
+    val finalTransY = baseTransY + (if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) dragOffsetY else 0f)
+
+    // Trigger open transition
+    LaunchedEffect(videoUri) {
+        transitionProgress.snapTo(0f)
+        transitionProgress.animateTo(1f, androidx.compose.animation.core.tween(durationMillis = 300))
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color.Black.copy(alpha = dimAlpha))
             .onGloballyPositioned { coordinates ->
                 playerRootSize = coordinates.size
                 playbackEngine.updateViewSizes(
@@ -319,39 +375,70 @@ fun PlayerScreen(
                 )
             }
             .graphicsLayer {
-                // Apply translation downward displacement for reactive swipe down interaction
-                if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
-                    translationY = dragOffsetY
+                scaleX = finalScaleX
+                scaleY = finalScaleY
+                translationX = finalTransX
+                translationY = finalTransY
+                if (initialBounds != null) {
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
                 }
-                // Apply horizontal swipe transition offset
-                translationX = swipeOffset.value
             }
+            .clip(RoundedCornerShape(dismissCornerDp.dp))
     ) {
-        AndroidView(
-            factory = { ctx ->
-                val host = videoOutputFactory.create(ctx)
-                videoHost = host
-                playbackEngine.attachVideoOutput(host)
-                host.setVideoScaleMode(scaleMode)
-                host.view
-            },
+        // 1. AndroidView Video Layout (fade in when playing)
+        val playerAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (state == PlaybackState.Playing) 1f else 0f,
+            animationSpec = androidx.compose.animation.core.tween(300)
+        )
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { coordinates ->
-                    androidViewSize = coordinates.size
-                    playbackEngine.updateViewSizes(
-                        playerRootWidth = playerRootSize.width,
-                        playerRootHeight = playerRootSize.height,
-                        androidViewWidth = androidViewSize.width,
-                        androidViewHeight = androidViewSize.height
-                    )
+                .graphicsLayer { alpha = playerAlpha }
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    val host = videoOutputFactory.create(ctx)
+                    videoHost = host
+                    playbackEngine.attachVideoOutput(host)
+                    host.setVideoScaleMode(scaleMode)
+                    host.view
                 },
-            onRelease = {
-                playbackEngine.detachVideoOutput()
-                videoHost?.dispose()
-                videoHost = null
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { coordinates ->
+                        androidViewSize = coordinates.size
+                        playbackEngine.updateViewSizes(
+                            playerRootWidth = playerRootSize.width,
+                            playerRootHeight = playerRootSize.height,
+                            androidViewWidth = androidViewSize.width,
+                            androidViewHeight = androidViewSize.height
+                        )
+                    },
+                onRelease = {
+                    playbackEngine.detachVideoOutput()
+                    videoHost?.dispose()
+                    videoHost = null
+                }
+            )
+        }
+
+        // 2. Thumbnail Overlay (visible when loading or transitioning)
+        if (state != PlaybackState.Playing || playerAlpha < 1f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                MediaThumbnail(
+                    contentUri = videoUri,
+                    mediaType = MediaType.VIDEO,
+                    modifier = Modifier.fillMaxSize(),
+                    width = 960,
+                    height = 540
+                )
             }
-        )
+        }
 
         // Gesture Overlay Detector Area
         Box(
@@ -445,8 +532,7 @@ fun PlayerScreen(
                                         triggerVideoChange(currentIndex + 1)
                                     }
                                     PlayerDragAction.Dismiss -> {
-                                        saveProgressAndStop()
-                                        onBack()
+                                        performDismiss()
                                     }
                                     PlayerDragAction.None -> {
                                         if (dragDirection == DragDirection.Vertical) {
@@ -501,8 +587,7 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
-                    saveProgressAndStop()
-                    onBack()
+                    performDismiss()
                 }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
@@ -550,6 +635,11 @@ fun PlayerScreen(
                         onValueChange = {
                             isDragging = true
                             dragPosition = it
+                            val now = System.currentTimeMillis()
+                            if (shouldFireScrubSeek(lastScrubSeekTime, now, 100L)) {
+                                lastScrubSeekTime = now
+                                playbackEngine.seekTo(it.toLong())
+                            }
                         },
                         onValueChangeFinished = {
                             isDragging = false
@@ -839,8 +929,7 @@ fun PlayerScreen(
                             }
                             TextButton(
                                 onClick = {
-                                    saveProgressAndStop()
-                                    onBack()
+                                    performDismiss()
                                 }
                             ) {
                                 Text(stringResource(R.string.close), color = MaterialTheme.colorScheme.onErrorContainer)
@@ -920,8 +1009,7 @@ fun PlayerScreen(
                             }
                             TextButton(
                                 onClick = {
-                                    saveProgressAndStop()
-                                    onBack()
+                                    performDismiss()
                                 }
                             ) {
                                 Text(stringResource(R.string.close), color = MaterialTheme.colorScheme.onErrorContainer)

@@ -3,18 +3,15 @@ package com.pigfarmerjc.galleryplayer
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
@@ -28,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 
@@ -43,11 +41,17 @@ fun VideoGridScreen(
     onSearchQueryChange: (String) -> Unit,
     sortMode: VideoSortMode,
     onSortModeChange: (VideoSortMode) -> Unit,
-    continueWatchingVideos: List<LocalMediaItem>,
+    // Continue Watching removed — use playbackProgressMap only for progress bars
     videoViewMode: VideoViewMode,
     onVideoViewModeChange: (VideoViewMode) -> Unit,
     photosGridColumns: Int,
-    onPhotosGridColumnsChange: (Int) -> Unit
+    onPhotosGridColumnsChange: (Int) -> Unit,
+    photosGapDp: Dp = 1.dp,
+    // Externally managed grid states for scroll position preservation
+    cardGridState: LazyGridState,
+    photosGridState: LazyGridState,
+    // Transition state for bounds tracking and shared element animation
+    transitionState: GalleryTransitionState
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -60,10 +64,6 @@ fun VideoGridScreen(
     val filteredVideos = remember(videos, searchQuery, sortMode) {
         VideoFilterAndSort.filterAndSort(videos, searchQuery, sortMode)
     }
-
-    // Keep separate grid states for Card View and Photos Grid to retain scroll positions
-    val cardGridState = rememberLazyGridState()
-    val photosGridState = rememberLazyGridState()
 
     if (isLoading && videos.isEmpty()) {
         Box(
@@ -117,20 +117,23 @@ fun VideoGridScreen(
         PhotosStyleVideoGridScreen(
             videos = videos,
             filteredVideos = filteredVideos,
-            continueWatchingVideos = continueWatchingVideos,
             playbackProgressMap = playbackProgressMap,
             columns = photosGridColumns,
             onColumnsChange = onPhotosGridColumnsChange,
+            gapDp = photosGapDp,
             searchQuery = searchQuery,
             onSearchQueryChange = onSearchQueryChange,
             sortMode = sortMode,
             onSortModeChange = onSortModeChange,
             onVideoClick = onVideoClick,
             gridState = photosGridState,
-            onVideoViewModeChange = onVideoViewModeChange
+            onVideoViewModeChange = onVideoViewModeChange,
+            transitionState = transitionState
         )
         return
     }
+
+    // ── Card View ──────────────────────────────────────────────────────────
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -152,7 +155,9 @@ fun VideoGridScreen(
             contentPadding = PaddingValues(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize().weight(1f)
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
         ) {
             // Header: Search & Sort
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -160,7 +165,6 @@ fun VideoGridScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Search Input
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = onSearchQueryChange,
@@ -178,7 +182,6 @@ fun VideoGridScreen(
                         shape = RoundedCornerShape(24.dp)
                     )
 
-                    // Sort menu and View mode header row
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -190,9 +193,7 @@ fun VideoGridScreen(
                         )
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                onVideoViewModeChange(VideoViewMode.PHOTOS_GRID)
-                            }) {
+                            TextButton(onClick = { onVideoViewModeChange(VideoViewMode.PHOTOS_GRID) }) {
                                 Icon(Icons.Default.GridView, contentDescription = "View Mode")
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(stringResource(R.string.photos_grid))
@@ -247,56 +248,18 @@ fun VideoGridScreen(
                 }
             }
 
-            // Continue Watching carousel row
-            if (continueWatchingVideos.isNotEmpty() && searchQuery.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.continue_watching),
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(
-                                items = continueWatchingVideos,
-                                key = { it.contentUri }
-                            ) { video ->
-                                val progressRatio = playbackProgressMap[video.contentUri]
-                                ContinueWatchingCard(
-                                    video = video,
-                                    progressRatio = progressRatio,
-                                    onClick = { onVideoClick(video, videos) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Empty state or main items grid
+            // Empty state
             if (filteredVideos.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(48.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.no_local_videos),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = stringResource(R.string.no_local_videos),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             } else {
@@ -307,62 +270,10 @@ fun VideoGridScreen(
                     VideoCard(
                         video = video,
                         progressRatio = playbackProgressMap[video.contentUri],
-                        onClick = { onVideoClick(video, filteredVideos) } // Pass filteredVideos as user requested
+                        onClick = { onVideoClick(video, filteredVideos) }
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun ContinueWatchingCard(
-    video: LocalMediaItem,
-    progressRatio: Float?,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .width(160.dp)
-            .clickable { onClick() },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-    ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-            ) {
-                MediaThumbnail(
-                    contentUri = video.contentUri,
-                    mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize(),
-                    width = 320,
-                    height = 180
-                )
-
-                // Overlay active linear progress indicator at the bottom of the thumbnail
-                if (progressRatio != null && progressRatio in 0.01f..0.99f) {
-                    LinearProgressIndicator(
-                        progress = { progressRatio },
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(3.dp)
-                    )
-                }
-            }
-            Text(
-                text = video.displayName,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(6.dp)
-            )
         }
     }
 }
@@ -412,7 +323,7 @@ fun VideoCard(
                     }
                 }
 
-                // Overlay active linear progress indicator at the bottom of the thumbnail
+                // Progress bar (kept for resume UX, no Continue Watching section)
                 if (progressRatio != null && progressRatio in 0.01f..0.99f) {
                     LinearProgressIndicator(
                         progress = { progressRatio },

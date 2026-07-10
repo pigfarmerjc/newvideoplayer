@@ -44,7 +44,9 @@ fun SettingsScreen(
     videoViewMode: VideoViewMode,
     onVideoViewModeChange: (VideoViewMode) -> Unit,
     photosGridColumns: Int,
-    onPhotosGridColumnsChange: (Int) -> Unit
+    onPhotosGridColumnsChange: (Int) -> Unit,
+    photosGridSpacing: Float,
+    onPhotosGridSpacingChange: (Float) -> Unit
 ) {
     var showDebugDialog by remember { mutableStateOf(false) }
     val diagnostics by playbackEngine.diagnostics.collectAsState()
@@ -221,6 +223,47 @@ fun SettingsScreen(
                         valueRange = 2f..12f,
                         steps = 9,
                         modifier = Modifier.fillMaxWidth()
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                    var spacingExpanded by remember { mutableStateOf(false) }
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.photos_grid_spacing)) },
+                        supportingContent = { Text(stringResource(R.string.photos_grid_spacing_desc)) },
+                        trailingContent = {
+                            Box {
+                                TextButton(onClick = { spacingExpanded = true }) {
+                                    val label = when (photosGridSpacing) {
+                                        1f -> stringResource(R.string.spacing_1dp)
+                                        2f -> stringResource(R.string.spacing_2dp)
+                                        4f -> stringResource(R.string.spacing_4dp)
+                                        else -> "${photosGridSpacing.toInt()}dp"
+                                    }
+                                    Text(label)
+                                }
+                                DropdownMenu(
+                                    expanded = spacingExpanded,
+                                    onDismissRequest = { spacingExpanded = false }
+                                ) {
+                                    listOf(1f, 2f, 4f).forEach { value ->
+                                        val label = when (value) {
+                                            1f -> stringResource(R.string.spacing_1dp)
+                                            2f -> stringResource(R.string.spacing_2dp)
+                                            4f -> stringResource(R.string.spacing_4dp)
+                                            else -> ""
+                                        }
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                onPhotosGridSpacingChange(value)
+                                                spacingExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     )
                 }
             }

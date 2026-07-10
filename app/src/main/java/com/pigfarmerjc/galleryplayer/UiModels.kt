@@ -2,6 +2,15 @@ package com.pigfarmerjc.galleryplayer
 
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 
+/** Screen-space bounds of a grid item, used for shared-element-style transitions. */
+data class MediaItemBounds(
+    val contentUri: String,
+    val left: Float,
+    val top: Float,
+    val width: Float,
+    val height: Float
+)
+
 sealed class Screen {
     object Home : Screen()
     
@@ -16,7 +25,9 @@ sealed class Screen {
         val videoTitle: String,
         val videoList: List<LocalMediaItem> = emptyList(),
         val currentIndex: Int = 0,
-        val initialPositionMs: Long = 0
+        val initialPositionMs: Long = 0,
+        /** Bounds of the originating grid cell, used for open/close thumbnail transition. */
+        val initialBounds: MediaItemBounds? = null
     ) : Screen()
     
     data class ImageViewer(
@@ -24,6 +35,7 @@ sealed class Screen {
         val initialIndex: Int
     ) : Screen()
 }
+
 
 enum class HomeTab {
     VIDEOS,

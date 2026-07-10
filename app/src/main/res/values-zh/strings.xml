@@ -92,4 +92,9 @@
     <string name="default_video_view_mode_desc">配置视频标签页的默认布局模式</string>
     <string name="photos_grid_columns_setting">相册网格列数</string>
     <string name="photos_grid_columns_setting_desc">调整相册网格视图中的显示列数</string>
+    <string name="photos_grid_spacing">相册网格间距</string>
+    <string name="photos_grid_spacing_desc">相册网格视图中视频之间的间距</string>
+    <string name="spacing_1dp">1dp (紧凑)</string>
+    <string name="spacing_2dp">2dp (舒适)</string>
+    <string name="spacing_4dp">4dp (宽敞)</string>
 </resources>
