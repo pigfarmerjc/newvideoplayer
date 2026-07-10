@@ -15,6 +15,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.res.stringResource
+import com.pigfarmerjc.galleryplayer.R
 
 object PermissionState {
 
@@ -79,13 +81,13 @@ fun PermissionScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "Media Access Permission Required",
+                    text = stringResource(R.string.media_access_permission_required),
                     style = MaterialTheme.typography.headlineSmall,
                     textAlign = TextAlign.Center
                 )
 
                 Text(
-                    text = "GalleryPlayer needs access to your local media to browse and play videos or view images. Please grant the permissions to proceed.",
+                    text = stringResource(R.string.media_access_permission_required_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -97,7 +99,7 @@ fun PermissionScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Grant Permission")
+                    Text(stringResource(R.string.grant_permission))
                 }
             }
         }
@@ -142,12 +144,12 @@ fun InlinePermissionRequest(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = if (permissionType == "video") "Videos Permission Required" else "Images Permission Required",
+                    text = if (permissionType == "video") stringResource(R.string.videos_permission_required) else stringResource(R.string.images_permission_required),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
                 Text(
-                    text = if (permissionType == "video") "Videos page needs video media permission to access local video files." else "Images page needs image media permission to access local images and GIFs.",
+                    text = if (permissionType == "video") stringResource(R.string.videos_permission_required_desc) else stringResource(R.string.images_permission_required_desc),
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
@@ -158,7 +160,7 @@ fun InlinePermissionRequest(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Grant ${permissionType.replaceFirstChar { it.uppercase() }} Permission", color = Color.White)
+                    Text(stringResource(R.string.grant_permission), color = Color.White)
                 }
             }
         }

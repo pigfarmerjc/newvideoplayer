@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">画廊播放器</string>
+    <string name="tab_videos">视频</string>
+    <string name="tab_folders">文件夹</string>
+    <string name="tab_images">图片</string>
+    <string name="tab_settings">设置</string>
+    <string name="search_videos">搜索视频</string>
+    <string name="sort">排序</string>
+    <string name="continue_watching">继续观看</string>
+    <string name="playback_mode">播放模式</string>
+    <string name="default_speed">默认倍速</string>
+    <string name="skip_seconds">快进/快退秒数</string>
+    <string name="diagnostics">诊断信息</string>
+    <string name="copy_diagnostics">复制诊断信息</string>
+    <string name="rescan_media">重新扫描媒体</string>
+    <string name="select_tf_card_folder">选择 TF 卡目录</string>
+    <string name="no_local_videos">未找到本地视频</string>
+    <string name="no_images">未找到图片</string>
+    <string name="grant_permission">授予权限</string>
+    <string name="playback_decoder_mode">解码模式</string>
+    <string name="card_view">卡片视图</string>
+    <string name="photos_grid">相册网格</string>
+    
+    <!-- Appearance / Theme -->
+    <string name="appearance">外观</string>
+    <string name="follow_system">跟随系统</string>
+    <string name="light_theme">浅色</string>
+    <string name="dark_theme">深色</string>
+    
+    <!-- Video Scale Mode -->
+    <string name="video_scale_mode">视频比例</string>
+    <string name="scale_fit">适应</string>
+    <string name="scale_fill">填充</string>
+    <string name="scale_center">居中</string>
+
+    <!-- Sort Options -->
+    <string name="sort_recent">最近修改</string>
+    <string name="sort_name_asc">名称 A-Z</string>
+    <string name="sort_name_desc">名称 Z-A</string>
+    <string name="sort_duration_desc">时长 (从长到短)</string>
+    <string name="sort_duration_asc">时长 (从短到长)</string>
+    <string name="sort_size_desc">大小 (从大到小)</string>
+    <string name="sort_size_asc">大小 (从小到大)</string>
+    
+    <string name="video_count">视频数量</string>
+    <string name="total_size">总大小</string>
+
+    <!-- UI Helper Texts -->
+    <string name="scan">扫描</string>
+    <string name="rescan_media_desc">触发本地媒体库与 SAF 文件扫描刷新</string>
+    <string name="playback_decoder_mode_desc">自动 / 强制硬件解码 / 纯软件解码（用于 4K 测试）</string>
+    <string name="external_saf_folders">外部 SAF 文件夹</string>
+    <string name="add_tf_card_desc">添加 TF 卡或自定义目录进行扫描</string>
+    <string name="add_folder">添加文件夹</string>
+    <string name="default_speed_desc">配置初始播放倍速</string>
+    <string name="skip_seconds_desc">双击手势快进/快退的秒数</string>
+    <string name="about">关于</string>
+    <string name="about_desc">画廊播放器本地 MVP 版 v1.0</string>
+    <string name="diagnostics_desc">查看引擎状态和媒体总数</string>
+    <string name="diagnostics_console">诊断控制台</string>
+    <string name="close">关闭</string>
+    <string name="retry">重试</string>
+    <string name="failed_to_load_videos">加载视频失败</string>
+    <string name="failed_to_load_folders">加载文件夹失败</string>
+    <string name="failed_to_load_images">加载图片失败</string>
+    <string name="no_folders_found">未找到文件夹</string>
+    <string name="add_videos_to_subdirs">在子目录中添加视频并刷新</string>
+    <string name="add_images_to_device">向设备添加图片并刷新</string>
+    
+    <!-- Player UI -->
+    <string name="playback_failed">播放失败</string>
+    <string name="playback_failed_desc">请切换解码模式或复制诊断信息</string>
+    <string name="loading_videos">正在加载本地视频...</string>
+    <string name="loading_folders">正在加载本地文件夹...</string>
+    <string name="loading_images">正在加载本地图片...</string>
+    
+    <!-- Permissions Screen -->
+    <string name="videos_permission_required">需要视频访问权限</string>
+    <string name="videos_permission_required_desc">视频页面需要读取媒体文件的权限以浏览和播放本地视频。</string>
+    <string name="images_permission_required">需要图片访问权限</string>
+    <string name="images_permission_required_desc">图片页面需要读取媒体文件的权限以浏览本地图片和 GIF 动图。</string>
+    <string name="media_access_permission_required">需要媒体库访问权限</string>
+    <string name="media_access_permission_required_desc">画廊播放器需要获取您设备的本地媒体库访问权限，以浏览和播放视频或图片。请授予权限以继续。</string>
+
+    <!-- Toast / Notification messages -->
+    <string name="media_library_refreshed">媒体库已刷新</string>
+    <string name="media_library_refresh_failed">刷新失败: %1$s</string>
+    <string name="playback_resumed">已从上次位置继续播放</string>
+</resources>

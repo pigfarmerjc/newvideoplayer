@@ -121,14 +121,7 @@ data class PlaybackHistoryEntity(
     @ColumnInfo(name = "completed") val completed: Boolean,
     @ColumnInfo(name = "play_count") val playCount: Int,
     @ColumnInfo(name = "preferred_speed") val preferredSpeed: Float
-) {
-    init {
-        require(positionMs >= 0) { "positionMs must be >= 0" }
-        require(durationMs >= 0) { "durationMs must be >= 0" }
-        require(playCount >= 0) { "playCount must be >= 0" }
-        require(preferredSpeed > 0f) { "preferredSpeed must be > 0" }
-    }
-}
+)
 
 @Entity(tableName = "storage_volumes")
 data class StorageVolumeEntity(

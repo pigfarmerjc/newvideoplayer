@@ -30,6 +30,8 @@ interface PlaybackEngine {
 interface VideoOutputHost {
     val view: View
     fun dispose()
+    fun setVideoScaleMode(mode: VideoScaleMode) {}
+    fun setVideoSize(width: Int, height: Int, rotation: Int) {}
 }
 
 interface VideoOutputHostFactory {

@@ -12,7 +12,7 @@ import com.pigfarmerjc.galleryplayer.core.database.dao.*
 import com.pigfarmerjc.galleryplayer.core.database.entity.*
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 
-class DatabaseConverters {
+object DatabaseConverters {
     @TypeConverter
     fun toMediaType(value: String?): MediaType? {
         return value?.let { MediaType.valueOf(it) }

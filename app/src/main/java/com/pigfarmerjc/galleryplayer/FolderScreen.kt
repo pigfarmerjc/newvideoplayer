@@ -2,6 +2,8 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.res.Configuration
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.stringResource
+import com.pigfarmerjc.galleryplayer.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -56,7 +58,7 @@ fun FolderScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CircularProgressIndicator()
-                Text("Loading local folders...", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.loading_folders), style = MaterialTheme.typography.bodyMedium)
             }
         }
         return
@@ -73,7 +75,7 @@ fun FolderScreen(
                 modifier = Modifier.padding(24.dp)
             ) {
                 Text(
-                    text = "Failed to load folders",
+                    text = stringResource(R.string.failed_to_load_folders),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -85,9 +87,9 @@ fun FolderScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.retry))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }
@@ -104,19 +106,19 @@ fun FolderScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "No folders found",
+                    text = stringResource(R.string.no_folders_found),
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "Add videos in subdirectories and refresh",
+                    text = stringResource(R.string.add_videos_to_subdirs),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.scan))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Refresh")
+                    Text(stringResource(R.string.scan))
                 }
             }
         }
@@ -144,20 +146,20 @@ fun FolderScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Folders (${sortedFolders.size})",
+                    text = "${stringResource(R.string.tab_folders)} (${sortedFolders.size})",
                     style = MaterialTheme.typography.titleMedium
                 )
                 
                 Box {
                     var sortExpanded by remember { mutableStateOf(false) }
                     TextButton(onClick = { sortExpanded = true }) {
-                        Icon(Icons.Default.Sort, contentDescription = "Sort")
+                        Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.sort))
                         Spacer(modifier = Modifier.width(4.dp))
                         val label = when (sortMode) {
-                            FolderSortMode.NAME_ASC -> "Name A-Z"
-                            FolderSortMode.VIDEO_COUNT_DESC -> "Video Count"
-                            FolderSortMode.TOTAL_SIZE_DESC -> "Total Size"
-                            FolderSortMode.DATE_MODIFIED_DESC -> "Recent Modified"
+                            FolderSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
+                            FolderSortMode.VIDEO_COUNT_DESC -> stringResource(R.string.video_count)
+                            FolderSortMode.TOTAL_SIZE_DESC -> stringResource(R.string.total_size)
+                            FolderSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
                         }
                         Text(label)
                     }
@@ -166,28 +168,28 @@ fun FolderScreen(
                         onDismissRequest = { sortExpanded = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Name A-Z") },
+                            text = { Text(stringResource(R.string.sort_name_asc)) },
                             onClick = {
                                 onSortModeChange(FolderSortMode.NAME_ASC)
                                 sortExpanded = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Video Count") },
+                            text = { Text(stringResource(R.string.video_count)) },
                             onClick = {
                                 onSortModeChange(FolderSortMode.VIDEO_COUNT_DESC)
                                 sortExpanded = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Total Size") },
+                            text = { Text(stringResource(R.string.total_size)) },
                             onClick = {
                                 onSortModeChange(FolderSortMode.TOTAL_SIZE_DESC)
                                 sortExpanded = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Recent Modified") },
+                            text = { Text(stringResource(R.string.sort_recent)) },
                             onClick = {
                                 onSortModeChange(FolderSortMode.DATE_MODIFIED_DESC)
                                 sortExpanded = false

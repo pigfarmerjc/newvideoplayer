@@ -247,6 +247,9 @@ open class LibVlcPlaybackEngine protected constructor(
             sampleRate = sampleRate,
             channels = channels
         )
+        if (width > 0 && height > 0) {
+            activeVideoOutput?.setVideoSize(width, height, rotation)
+        }
     }
 
     private fun updateVideoSize() {
@@ -257,7 +260,19 @@ open class LibVlcPlaybackEngine protected constructor(
             if (track.type == IMedia.Track.Type.Video) {
                 val videoTrack = track as? IMedia.VideoTrack
                 if (videoTrack != null) {
-                    _videoSize.value = VideoSize(videoTrack.width, videoTrack.height)
+                    val w = videoTrack.width
+                    val h = videoTrack.height
+                    var rot = 0
+                    when (videoTrack.orientation) {
+                        2 -> rot = 180
+                        3 -> rot = 180
+                        4 -> rot = 90
+                        5 -> rot = 90
+                        6 -> rot = 270
+                        7 -> rot = 270
+                    }
+                    _videoSize.value = VideoSize(w, h)
+                    activeVideoOutput?.setVideoSize(w, h, rot)
                     break
                 }
             }
@@ -461,6 +476,11 @@ open class LibVlcPlaybackEngine protected constructor(
             detachVideoOutput()
         }
         activeVideoOutput = output
+        val size = _videoSize.value
+        val rot = _diagnostics.value.rotation
+        if (size != null) {
+            output.setVideoSize(size.width, size.height, rot)
+        }
         val vlcHost = output as? LibVlcVideoOutputHost ?: return
         val layout = vlcHost.vlcLayout ?: return
         mediaPlayer?.let { player ->

@@ -1,5 +1,7 @@
 package com.pigfarmerjc.galleryplayer
 
+import com.pigfarmerjc.galleryplayer.core.player.api.VideoScaleMode
+
 
 import android.app.Application
 import android.os.Build
@@ -85,6 +87,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var videoSortMode by mutableStateOf(VideoSortMode.DATE_MODIFIED_DESC)
     var folderSortMode by mutableStateOf(FolderSortMode.VIDEO_COUNT_DESC)
     var repeatModeState by mutableStateOf(PlaybackRepeatMode.NONE)
+    var themeModeState by mutableStateOf(AppThemeMode.SYSTEM)
+    var scaleModeState by mutableStateOf(VideoScaleMode.FIT)
 
     val historyListState = mutableStateOf<List<com.pigfarmerjc.galleryplayer.core.database.repository.PlaybackHistoryItem>>(emptyList())
 
@@ -114,6 +118,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val safPrefs = application.getSharedPreferences("saf_settings", android.content.Context.MODE_PRIVATE)
         safAuthorizedFolders = safPrefs.getStringSet("authorized_folders", emptySet())?.toList() ?: emptyList()
+
+        val themePrefs = application.getSharedPreferences("theme_settings", android.content.Context.MODE_PRIVATE)
+        themeModeState = AppThemeMode.values().firstOrNull { it.name == themePrefs.getString("theme_mode", AppThemeMode.SYSTEM.name) } ?: AppThemeMode.SYSTEM
+
+        val scaleModeVal = playbackPrefs.getString("scale_mode", VideoScaleMode.FIT.name) ?: VideoScaleMode.FIT.name
+        scaleModeState = VideoScaleMode.values().firstOrNull { it.name == scaleModeVal } ?: VideoScaleMode.FIT
 
         // Stream playback history changes to the progress map
         viewModelScope.launch {
@@ -200,6 +210,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         playbackEngine.setDecoderMode(mode)
         getApplication<Application>().getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
             .edit().putString("decoder_mode", mode.name).apply()
+    }
+
+    fun updateThemeMode(mode: AppThemeMode) {
+        themeModeState = mode
+        getApplication<Application>().getSharedPreferences("theme_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("theme_mode", mode.name).apply()
+    }
+
+    fun updateScaleMode(mode: VideoScaleMode) {
+        scaleModeState = mode
+        getApplication<Application>().getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("scale_mode", mode.name).apply()
     }
 
     fun startPlaybackSession(video: LocalMediaItem) {
@@ -323,10 +345,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 mediaRepositoryCount = v.size + img.size
                 lastRefreshDurationMs = System.currentTimeMillis() - startTime
 
-                android.widget.Toast.makeText(context, "媒体库已刷新", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.media_library_refreshed), android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 mediaLoadError = e.localizedMessage ?: "Failed to read storage"
-                android.widget.Toast.makeText(context, "刷新失败: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.media_library_refresh_failed, e.localizedMessage ?: ""), android.widget.Toast.LENGTH_LONG).show()
             } finally {
                 isLoadingMedia = false
             }
@@ -373,7 +395,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MaterialTheme {
+            GalleryPlayerTheme(themeMode = viewModel.themeModeState) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -396,7 +418,7 @@ class MainActivity : ComponentActivity() {
                                         scope.launch {
                                             val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
                                             if (resumePos > 0L) {
-                                                android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                android.widget.Toast.makeText(context, context.getString(R.string.playback_resumed), android.widget.Toast.LENGTH_SHORT).show()
                                             }
                                             screenStack.add(
                                                 Screen.Player(
@@ -452,7 +474,9 @@ class MainActivity : ComponentActivity() {
                                     decoderModeState = viewModel.decoderModeState,
                                     onDecoderModeChange = { viewModel.updateDecoderMode(it) },
                                     onAddSafFolder = { viewModel.addSafFolder(it, context) },
-                                    onRemoveSafFolder = { viewModel.removeSafFolder(it, context) }
+                                    onRemoveSafFolder = { viewModel.removeSafFolder(it, context) },
+                                    themeMode = viewModel.themeModeState,
+                                    onThemeModeChange = { viewModel.updateThemeMode(it) }
                                 )
                             }
                             is Screen.FolderVideos -> {
@@ -482,7 +506,7 @@ class MainActivity : ComponentActivity() {
                                                 scope.launch {
                                                     val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
                                                     if (resumePos > 0L) {
-                                                        android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                        android.widget.Toast.makeText(context, context.getString(R.string.playback_resumed), android.widget.Toast.LENGTH_SHORT).show()
                                                     }
                                                     screenStack.add(
                                                         Screen.Player(
@@ -524,7 +548,7 @@ class MainActivity : ComponentActivity() {
                                         scope.launch {
                                             val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
                                             if (resumePos > 0L) {
-                                                android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                android.widget.Toast.makeText(context, context.getString(R.string.playback_resumed), android.widget.Toast.LENGTH_SHORT).show()
                                             }
                                             screenStack[screenStack.lastIndex] = Screen.Player(
                                                 videoUri = newItem.contentUri,
@@ -556,7 +580,9 @@ class MainActivity : ComponentActivity() {
                                     defaultSpeed = viewModel.defaultSpeed,
                                     skipSeconds = viewModel.skipSeconds,
                                     repeatMode = viewModel.repeatModeState,
-                                    onRepeatModeChange = { viewModel.updateRepeatMode(it) }
+                                    onRepeatModeChange = { viewModel.updateRepeatMode(it) },
+                                    scaleMode = viewModel.scaleModeState,
+                                    onScaleModeChange = { viewModel.updateScaleMode(it) }
                                 )
                             }
                             is Screen.ImageViewer -> {

@@ -18,12 +18,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -60,7 +64,9 @@ fun PlayerScreen(
     defaultSpeed: Float,
     skipSeconds: Int,
     repeatMode: PlaybackRepeatMode,
-    onRepeatModeChange: (PlaybackRepeatMode) -> Unit
+    onRepeatModeChange: (PlaybackRepeatMode) -> Unit,
+    scaleMode: VideoScaleMode,
+    onScaleModeChange: (VideoScaleMode) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -99,6 +105,13 @@ fun PlayerScreen(
     val verticalThresholdPx = remember { with(density) { 140.dp.toPx() } }
     val lockThresholdPx = remember { with(density) { 10.dp.toPx() } }
 
+    // Transition state driven by parent
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val swipeOffset = remember { Animatable(0f) }
+    var isTransitioning by remember { mutableStateOf(false) }
+    var transitionDirection by remember { mutableStateOf(1) } // 1: Next (swiped left, new enters from right), -1: Prev (swiped right, new enters from left)
+    var lastVideoUri by remember { mutableStateOf(videoUri) }
+
     // Safe save helper
     val saveProgressAndStop = {
         val currentPos = playbackEngine.positionMs.value
@@ -108,6 +121,37 @@ fun PlayerScreen(
             onPlaybackProgress(currentPos, dur, isFinished)
         }
         playbackEngine.stop()
+    }
+
+    val triggerVideoChange: (Int) -> Unit = { newIndex ->
+        if (!isTransitioning && newIndex in videoList.indices) {
+            val direction = if (newIndex > currentIndex) 1 else -1
+            transitionDirection = direction
+            isTransitioning = true
+            coroutineScope.launch {
+                val targetOffset = if (direction == 1) -screenWidthPx else screenWidthPx
+                swipeOffset.animateTo(targetOffset, animationSpec = androidx.compose.animation.core.tween(durationMillis = 200))
+                saveProgressAndStop()
+                onChangeVideo(newIndex)
+            }
+        }
+    }
+
+    // Reset translation when parent updates URI
+    LaunchedEffect(videoUri) {
+        if (videoUri != lastVideoUri) {
+            lastVideoUri = videoUri
+            if (isTransitioning) {
+                val startOffset = if (transitionDirection == 1) screenWidthPx else -screenWidthPx
+                swipeOffset.snapTo(startOffset)
+                swipeOffset.animateTo(0f, animationSpec = androidx.compose.animation.core.tween(durationMillis = 200))
+                isTransitioning = false
+            }
+        } else {
+            // Just in case, reset offset if URI didn't change but transition finished
+            swipeOffset.snapTo(0f)
+            isTransitioning = false
+        }
     }
 
     // Full-screen immersive window setup
@@ -151,6 +195,11 @@ fun PlayerScreen(
         }
     }
 
+    // Pass scale mode to videoHost when host changes or scaleMode changes
+    LaunchedEffect(videoHost, scaleMode) {
+        videoHost?.setVideoScaleMode(scaleMode)
+    }
+
     // Apply speed once playing starts
     LaunchedEffect(state) {
         if (state == PlaybackState.Playing && !hasAppliedDefaultSpeed) {
@@ -175,17 +224,13 @@ fun PlayerScreen(
                     saveProgressAndStop()
                 }
                 PlaybackRepeatMode.ONE -> {
-                    // Repeat current video: seek to 0 and play again.
-                    // This does not change the videoUri, so hasStartedSession remains true
-                    // and duplicate playCount additions are blocked.
                     playbackEngine.seekTo(0L)
                     playbackEngine.play()
                 }
                 PlaybackRepeatMode.ALL -> {
-                    saveProgressAndStop()
                     if (videoList.isNotEmpty()) {
                         val nextIndex = (currentIndex + 1) % videoList.size
-                        onChangeVideo(nextIndex)
+                        triggerVideoChange(nextIndex)
                     }
                 }
             }
@@ -240,6 +285,8 @@ fun PlayerScreen(
                 if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
                     translationY = dragOffsetY
                 }
+                // Apply horizontal swipe transition offset
+                translationX = swipeOffset.value
             }
     ) {
         AndroidView(
@@ -247,6 +294,7 @@ fun PlayerScreen(
                 val host = videoOutputFactory.create(ctx)
                 videoHost = host
                 playbackEngine.attachVideoOutput(host)
+                host.setVideoScaleMode(scaleMode)
                 host.view
             },
             modifier = Modifier.fillMaxSize(),
@@ -292,7 +340,7 @@ fun PlayerScreen(
                         }
                     )
                 }
-                .pointerInput(currentIndex, videoList.size) {
+                .pointerInput(currentIndex, videoList.size, isTransitioning) {
                     detectDragGestures(
                         onDragStart = {
                             dragOffsetX = 0f
@@ -300,7 +348,6 @@ fun PlayerScreen(
                             dragDirection = DragDirection.Undecided
                         },
                         onDrag = { change, dragAmount ->
-                            // Avoid registering drag if we're touching active seekbar or buttons (handled by click checks)
                             dragOffsetX += dragAmount.x
                             dragOffsetY += dragAmount.y
 
@@ -335,12 +382,10 @@ fun PlayerScreen(
 
                             when (action) {
                                 PlayerDragAction.Previous -> {
-                                    saveProgressAndStop()
-                                    onChangeVideo(currentIndex - 1)
+                                    triggerVideoChange(currentIndex - 1)
                                 }
                                 PlayerDragAction.Next -> {
-                                    saveProgressAndStop()
-                                    onChangeVideo(currentIndex + 1)
+                                    triggerVideoChange(currentIndex + 1)
                                 }
                                 PlayerDragAction.Dismiss -> {
                                     saveProgressAndStop()
@@ -348,7 +393,6 @@ fun PlayerScreen(
                                 }
                                 PlayerDragAction.None -> {
                                     if (dragDirection == DragDirection.Vertical) {
-                                        // Snap back to original position
                                         coroutineScope.launch {
                                             val anim = Animatable(dragOffsetY)
                                             anim.animateTo(0f, animationSpec = spring()) {
@@ -378,13 +422,23 @@ fun PlayerScreen(
                 }
         )
 
+        // Top and Bottom Controls Overlays
         if (controlsVisible) {
+            val folderName = remember(videoUri) {
+                val activeVideoItem = videoList.getOrNull(currentIndex)
+                activeVideoItem?.relativePath?.trimEnd('/')?.split('/')?.lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
+            }
+
             // Top Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(8.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent)
+                        )
+                    )
+                    .padding(top = 16.dp, bottom = 24.dp, start = 16.dp, end = 16.dp)
                     .align(Alignment.TopCenter),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -395,24 +449,38 @@ fun PlayerScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = videoTitle,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = videoTitle,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = folderName,
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
-            // Bottom controls panel
+            // Bottom controls panel (3 Rows Layout)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(16.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                        )
+                    )
+                    .padding(top = 32.dp, bottom = 24.dp, start = 16.dp, end = 16.dp)
                     .align(Alignment.BottomCenter),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Seekbar and time layout
+                // Row 1: Seekbar and time layout
                 val sliderValue = if (isDragging) dragPosition else position.toFloat()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -440,20 +508,18 @@ fun PlayerScreen(
                     )
                 }
 
-                // Control buttons row
+                // Row 2: Playback Action Controls
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Previous Button
+                    // Skip Previous
                     val hasPrev = currentIndex > 0
                     IconButton(
-                        onClick = {
-                            saveProgressAndStop()
-                            onChangeVideo(currentIndex - 1)
-                        },
-                        enabled = hasPrev
+                        onClick = { triggerVideoChange(currentIndex - 1) },
+                        enabled = hasPrev && !isTransitioning,
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Filled.SkipPrevious,
@@ -463,52 +529,62 @@ fun PlayerScreen(
                         )
                     }
 
+                    Spacer(modifier = Modifier.width(16.dp))
+
                     // Seek Backward Custom Seconds
-                    TextButton(onClick = {
-                        playbackEngine.seekTo(maxOf(position - skipSeconds * 1000L, 0L))
-                    }) {
+                    TextButton(
+                        onClick = { playbackEngine.seekTo(maxOf(position - skipSeconds * 1000L, 0L)) },
+                        modifier = Modifier.size(48.dp)
+                    ) {
                         Text(
                             text = "-${skipSeconds}s",
                             color = Color.White,
-                            style = MaterialTheme.typography.titleMedium
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
 
-                    // Play / Pause Toggle (Enlarged)
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    // Play / Pause Toggle (Circular, Enlarged)
                     IconButton(
                         onClick = {
                             if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
                         },
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(Color.White.copy(alpha = 0.2f), shape = RoundedCornerShape(36.dp))
                     ) {
                         val icon = if (state == PlaybackState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow
                         Icon(
                             imageVector = icon,
                             contentDescription = "Play/Pause",
                             tint = Color.White,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(48.dp)
                         )
                     }
 
+                    Spacer(modifier = Modifier.width(16.dp))
+
                     // Seek Forward Custom Seconds
-                    TextButton(onClick = {
-                        playbackEngine.seekTo(minOf(position + skipSeconds * 1000L, duration))
-                    }) {
+                    TextButton(
+                        onClick = { playbackEngine.seekTo(minOf(position + skipSeconds * 1000L, duration)) },
+                        modifier = Modifier.size(48.dp)
+                    ) {
                         Text(
                             text = "+${skipSeconds}s",
                             color = Color.White,
-                            style = MaterialTheme.typography.titleMedium
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
 
-                    // Next Button
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    // Skip Next
                     val hasNext = currentIndex < videoList.size - 1
                     IconButton(
-                        onClick = {
-                            saveProgressAndStop()
-                            onChangeVideo(currentIndex + 1)
-                        },
-                        enabled = hasNext
+                        onClick = { triggerVideoChange(currentIndex + 1) },
+                        enabled = hasNext && !isTransitioning,
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Filled.SkipNext,
@@ -517,8 +593,40 @@ fun PlayerScreen(
                             modifier = Modifier.size(28.dp)
                         )
                     }
+                }
 
-                    // Playback Repeat Mode Cycle Button
+                // Row 3: Speed, Repeat Mode, Aspect Ratio scaling
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Playback Speed Selector
+                    var speedExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { speedExpanded = true }) {
+                            Icon(Icons.Filled.Speed, contentDescription = "Speed", tint = Color.White, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("${currentSpeed}x", color = Color.White)
+                        }
+                        DropdownMenu(
+                            expanded = speedExpanded,
+                            onDismissRequest = { speedExpanded = false }
+                        ) {
+                            listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { s ->
+                                DropdownMenuItem(
+                                    text = { Text("${s}x") },
+                                    onClick = {
+                                        currentSpeed = s
+                                        playbackEngine.setSpeed(s)
+                                        speedExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Playback Repeat Mode Cycle
                     IconButton(onClick = {
                         val nextMode = when (repeatMode) {
                             PlaybackRepeatMode.NONE -> PlaybackRepeatMode.ONE
@@ -535,25 +643,112 @@ fun PlayerScreen(
                         Icon(icon, contentDescription = desc, tint = Color.White)
                     }
 
-                    // Speed selector
-                    var speedExpanded by remember { mutableStateOf(false) }
+                    // Video Scale Mode Toggle
+                    var scaleExpanded by remember { mutableStateOf(false) }
                     Box {
-                        Button(onClick = { speedExpanded = true }) {
-                            Text("${currentSpeed}x")
+                        TextButton(onClick = { scaleExpanded = true }) {
+                            Icon(Icons.Filled.AspectRatio, contentDescription = "Scale Mode", tint = Color.White, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            val scaleLabel = when (scaleMode) {
+                                VideoScaleMode.FIT -> stringResource(R.string.scale_fit)
+                                VideoScaleMode.FILL -> stringResource(R.string.scale_fill)
+                                VideoScaleMode.CENTER -> stringResource(R.string.scale_center)
+                            }
+                            Text(scaleLabel, color = Color.White)
                         }
                         DropdownMenu(
-                            expanded = speedExpanded,
-                            onDismissRequest = { speedExpanded = false }
+                            expanded = scaleExpanded,
+                            onDismissRequest = { scaleExpanded = false }
                         ) {
-                            listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { s ->
+                            VideoScaleMode.values().forEach { mode ->
+                                val modeLabel = when (mode) {
+                                    VideoScaleMode.FIT -> stringResource(R.string.scale_fit)
+                                    VideoScaleMode.FILL -> stringResource(R.string.scale_fill)
+                                    VideoScaleMode.CENTER -> stringResource(R.string.scale_center)
+                                }
                                 DropdownMenuItem(
-                                    text = { Text("${s}x") },
+                                    text = { Text(modeLabel) },
                                     onClick = {
-                                        currentSpeed = s
-                                        playbackEngine.setSpeed(s)
-                                        speedExpanded = false
+                                        onScaleModeChange(mode)
+                                        scaleExpanded = false
                                     }
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Failure state overlay
+        if (state == PlaybackState.Error) {
+            val diagnosticsValue by playbackEngine.diagnostics.collectAsState()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.75f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Error,
+                            contentDescription = "Error",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.playback_failed),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            text = stringResource(R.string.playback_failed_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val annotatedString = android.text.TextUtils.concat(
+                                        "Device: ${android.os.Build.BRAND} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})\n",
+                                        "App Version: 1.0 (Debug Build)\n",
+                                        "Media Stats: ${videoList.size} videos\n",
+                                        "Decoder Mode: ${diagnosticsValue.decoderMode}\n",
+                                        "Last Playback Title: $videoTitle\n",
+                                        "Last Playback URI: $videoUri\n",
+                                        "Playback Error: ${diagnosticsValue.lastError}\n",
+                                        "Playback State: ${playbackEngine.playbackState.value}\n",
+                                        "Track Resolution: ${diagnosticsValue.width}x${diagnosticsValue.height}\n",
+                                        "Audio: ${diagnosticsValue.sampleRate}Hz / ${diagnosticsValue.channels}ch\n"
+                                    ).toString()
+                                    
+                                    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("Diagnostics", annotatedString))
+                                    android.widget.Toast.makeText(context, "Diagnostics copied to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text(stringResource(R.string.copy_diagnostics))
+                            }
+                            TextButton(
+                                onClick = {
+                                    saveProgressAndStop()
+                                    onBack()
+                                }
+                            ) {
+                                Text(stringResource(R.string.close), color = MaterialTheme.colorScheme.onErrorContainer)
                             }
                         }
                     }

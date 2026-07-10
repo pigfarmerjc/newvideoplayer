@@ -44,7 +44,9 @@ fun HomeScreen(
     decoderModeState: DecoderMode,
     onDecoderModeChange: (DecoderMode) -> Unit,
     onAddSafFolder: (String) -> Unit,
-    onRemoveSafFolder: (String) -> Unit
+    onRemoveSafFolder: (String) -> Unit,
+    themeMode: AppThemeMode,
+    onThemeModeChange: (AppThemeMode) -> Unit
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -56,26 +58,26 @@ fun HomeScreen(
                 NavigationBarItem(
                     selected = activeTab == HomeTab.VIDEOS,
                     onClick = { activeTab = HomeTab.VIDEOS },
-                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Videos") },
-                    label = { Text("Videos") }
+                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = androidx.compose.ui.res.stringResource(R.string.tab_videos)) },
+                    label = { Text(androidx.compose.ui.res.stringResource(R.string.tab_videos)) }
                 )
                 NavigationBarItem(
                     selected = activeTab == HomeTab.FOLDERS,
                     onClick = { activeTab = HomeTab.FOLDERS },
-                    icon = { Icon(Icons.Default.Menu, contentDescription = "Folders") },
-                    label = { Text("Folders") }
+                    icon = { Icon(Icons.Default.Folder, contentDescription = androidx.compose.ui.res.stringResource(R.string.tab_folders)) },
+                    label = { Text(androidx.compose.ui.res.stringResource(R.string.tab_folders)) }
                 )
                 NavigationBarItem(
                     selected = activeTab == HomeTab.IMAGES,
                     onClick = { activeTab = HomeTab.IMAGES },
-                    icon = { Icon(Icons.Default.Face, contentDescription = "Images") },
-                    label = { Text("Images") }
+                    icon = { Icon(Icons.Default.Image, contentDescription = androidx.compose.ui.res.stringResource(R.string.tab_images)) },
+                    label = { Text(androidx.compose.ui.res.stringResource(R.string.tab_images)) }
                 )
                 NavigationBarItem(
                     selected = activeTab == HomeTab.SETTINGS,
                     onClick = { activeTab = HomeTab.SETTINGS },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                    label = { Text("Settings") }
+                    icon = { Icon(Icons.Default.Settings, contentDescription = androidx.compose.ui.res.stringResource(R.string.tab_settings)) },
+                    label = { Text(androidx.compose.ui.res.stringResource(R.string.tab_settings)) }
                 )
             }
         }
@@ -143,7 +145,9 @@ fun HomeScreen(
                         onRemoveSafFolder = onRemoveSafFolder,
                         videosCount = videos.size,
                         imagesCount = images.size,
-                        foldersCount = folders.size
+                        foldersCount = folders.size,
+                        themeMode = themeMode,
+                        onThemeModeChange = onThemeModeChange
                     )
                 }
             }

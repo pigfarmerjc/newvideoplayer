@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
@@ -36,7 +37,9 @@ fun SettingsScreen(
     onRemoveSafFolder: (String) -> Unit,
     videosCount: Int,
     imagesCount: Int,
-    foldersCount: Int
+    foldersCount: Int,
+    themeMode: AppThemeMode,
+    onThemeModeChange: (AppThemeMode) -> Unit
 ) {
     var showDebugDialog by remember { mutableStateOf(false) }
     val diagnostics by playbackEngine.diagnostics.collectAsState()
@@ -59,7 +62,7 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = "Settings",
+            text = stringResource(R.string.tab_settings),
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 12.dp)
         )
@@ -70,11 +73,61 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
             ListItem(
-                headlineContent = { Text("Re-scan Media") },
-                supportingContent = { Text("Triggers local MediaStore and SAF files scanner refresh") },
+                headlineContent = { Text(stringResource(R.string.rescan_media)) },
+                supportingContent = { Text(stringResource(R.string.rescan_media_desc)) },
                 trailingContent = {
                     Button(onClick = onReload) {
-                        Text("Scan")
+                        Text(stringResource(R.string.scan))
+                    }
+                }
+            )
+        }
+
+        // Appearance Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            var themeExpanded by remember { mutableStateOf(false) }
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.appearance)) },
+                supportingContent = {
+                    val label = when (themeMode) {
+                        AppThemeMode.SYSTEM -> stringResource(R.string.follow_system)
+                        AppThemeMode.LIGHT -> stringResource(R.string.light_theme)
+                        AppThemeMode.DARK -> stringResource(R.string.dark_theme)
+                    }
+                    Text(label)
+                },
+                trailingContent = {
+                    Box {
+                        TextButton(onClick = { themeExpanded = true }) {
+                            val label = when (themeMode) {
+                                AppThemeMode.SYSTEM -> stringResource(R.string.follow_system)
+                                AppThemeMode.LIGHT -> stringResource(R.string.light_theme)
+                                AppThemeMode.DARK -> stringResource(R.string.dark_theme)
+                            }
+                            Text(label)
+                        }
+                        DropdownMenu(
+                            expanded = themeExpanded,
+                            onDismissRequest = { themeExpanded = false }
+                        ) {
+                            AppThemeMode.values().forEach { mode ->
+                                val label = when (mode) {
+                                    AppThemeMode.SYSTEM -> stringResource(R.string.follow_system)
+                                    AppThemeMode.LIGHT -> stringResource(R.string.light_theme)
+                                    AppThemeMode.DARK -> stringResource(R.string.dark_theme)
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        onThemeModeChange(mode)
+                                        themeExpanded = false
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             )
@@ -87,8 +140,8 @@ fun SettingsScreen(
         ) {
             var decExpanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text("Playback Decoder Mode") },
-                supportingContent = { Text("Auto / Forced Hardware / Software Only (for 4K testing)") },
+                headlineContent = { Text(stringResource(R.string.playback_decoder_mode)) },
+                supportingContent = { Text(stringResource(R.string.playback_decoder_mode_desc)) },
                 trailingContent = {
                     Box {
                         TextButton(onClick = { decExpanded = true }) {
@@ -124,12 +177,13 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("External SAF Folders", style = MaterialTheme.typography.titleMedium)
-                        Text("Add TF card or custom directory to scan", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.external_saf_folders), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.add_tf_card_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Button(onClick = { safPickerLauncher.launch(null) }) {
-                        Text("Add Folder")
+                        Text(stringResource(R.string.add_folder))
                     }
                 }
                 if (safAuthorizedFolders.isNotEmpty()) {
@@ -166,8 +220,8 @@ fun SettingsScreen(
         ) {
             var speedExpanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text("Default Playback Speed") },
-                supportingContent = { Text("Configures initial multiplier speed") },
+                headlineContent = { Text(stringResource(R.string.default_speed)) },
+                supportingContent = { Text(stringResource(R.string.default_speed_desc)) },
                 trailingContent = {
                     Box {
                         TextButton(onClick = { speedExpanded = true }) {
@@ -199,8 +253,8 @@ fun SettingsScreen(
         ) {
             var skipExpanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text("Double-tap Skip Seconds") },
-                supportingContent = { Text("Duration for skip gestures seeking") },
+                headlineContent = { Text(stringResource(R.string.skip_seconds)) },
+                supportingContent = { Text(stringResource(R.string.skip_seconds_desc)) },
                 trailingContent = {
                     Box {
                         TextButton(onClick = { skipExpanded = true }) {
@@ -231,8 +285,8 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
             ListItem(
-                headlineContent = { Text("About") },
-                supportingContent = { Text("GalleryPlayer Local MVP Player v1.0") }
+                headlineContent = { Text(stringResource(R.string.about)) },
+                supportingContent = { Text(stringResource(R.string.about_desc)) }
             )
         }
 
@@ -244,8 +298,8 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             ListItem(
-                headlineContent = { Text("Diagnostics & Debug Info", color = MaterialTheme.colorScheme.onPrimaryContainer) },
-                supportingContent = { Text("Inspect engine statuses and media totals", color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)) },
+                headlineContent = { Text(stringResource(R.string.diagnostics), color = MaterialTheme.colorScheme.onPrimaryContainer) },
+                supportingContent = { Text(stringResource(R.string.diagnostics_desc), color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)) },
                 trailingContent = {
                     Icon(
                         imageVector = Icons.Default.Info,
@@ -261,7 +315,7 @@ fun SettingsScreen(
     if (showDebugDialog) {
         AlertDialog(
             onDismissRequest = { showDebugDialog = false },
-            title = { Text("Diagnostics Console") },
+            title = { Text(stringResource(R.string.diagnostics_console)) },
             text = {
                 Column(
                     modifier = Modifier
@@ -331,10 +385,10 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Copy Diagnostics")
+                        Text(stringResource(R.string.copy_diagnostics))
                     }
                     TextButton(onClick = { showDebugDialog = false }, modifier = Modifier.weight(1f)) {
-                        Text("Close")
+                        Text(stringResource(R.string.close))
                     }
                 }
             }

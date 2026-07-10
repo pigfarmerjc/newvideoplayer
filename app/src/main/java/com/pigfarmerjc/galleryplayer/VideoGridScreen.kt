@@ -2,6 +2,8 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.stringResource
+import com.pigfarmerjc.galleryplayer.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -63,7 +65,7 @@ fun VideoGridScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CircularProgressIndicator()
-                Text("Loading local videos...", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.loading_videos), style = MaterialTheme.typography.bodyMedium)
             }
         }
         return
@@ -80,7 +82,7 @@ fun VideoGridScreen(
                 modifier = Modifier.padding(24.dp)
             ) {
                 Text(
-                    text = "Failed to load videos",
+                    text = stringResource(R.string.failed_to_load_videos),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -92,9 +94,9 @@ fun VideoGridScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.retry))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }
@@ -133,8 +135,8 @@ fun VideoGridScreen(
                         value = searchQuery,
                         onValueChange = onSearchQueryChange,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        placeholder = { Text("Search videos or folders...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                        placeholder = { Text(stringResource(R.string.search_videos)) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_videos)) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { onSearchQueryChange("") }) {
@@ -153,23 +155,23 @@ fun VideoGridScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Videos (${filteredVideos.size})",
+                            text = "${stringResource(R.string.tab_videos)} (${filteredVideos.size})",
                             style = MaterialTheme.typography.titleMedium
                         )
 
                         Box {
                             var sortExpanded by remember { mutableStateOf(false) }
                             TextButton(onClick = { sortExpanded = true }) {
-                                Icon(Icons.Default.Sort, contentDescription = "Sort")
+                                Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.sort))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 val label = when (sortMode) {
-                                    VideoSortMode.DATE_MODIFIED_DESC -> "Recently Modified"
-                                    VideoSortMode.NAME_ASC -> "Name A-Z"
-                                    VideoSortMode.NAME_DESC -> "Name Z-A"
-                                    VideoSortMode.DURATION_DESC -> "Duration (Long)"
-                                    VideoSortMode.DURATION_ASC -> "Duration (Short)"
-                                    VideoSortMode.SIZE_DESC -> "Size (Large)"
-                                    VideoSortMode.SIZE_ASC -> "Size (Small)"
+                                    VideoSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
+                                    VideoSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
+                                    VideoSortMode.NAME_DESC -> stringResource(R.string.sort_name_desc)
+                                    VideoSortMode.DURATION_DESC -> stringResource(R.string.sort_duration_desc)
+                                    VideoSortMode.DURATION_ASC -> stringResource(R.string.sort_duration_asc)
+                                    VideoSortMode.SIZE_DESC -> stringResource(R.string.sort_size_desc)
+                                    VideoSortMode.SIZE_ASC -> stringResource(R.string.sort_size_asc)
                                 }
                                 Text(label)
                             }
@@ -181,13 +183,13 @@ fun VideoGridScreen(
                                     DropdownMenuItem(
                                         text = {
                                             val text = when (mode) {
-                                                VideoSortMode.DATE_MODIFIED_DESC -> "Recently Modified"
-                                                VideoSortMode.NAME_ASC -> "Name A-Z"
-                                                VideoSortMode.NAME_DESC -> "Name Z-A"
-                                                VideoSortMode.DURATION_DESC -> "Duration (Long)"
-                                                VideoSortMode.DURATION_ASC -> "Duration (Short)"
-                                                VideoSortMode.SIZE_DESC -> "Size (Large)"
-                                                VideoSortMode.SIZE_ASC -> "Size (Small)"
+                                                VideoSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
+                                                VideoSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
+                                                VideoSortMode.NAME_DESC -> stringResource(R.string.sort_name_desc)
+                                                VideoSortMode.DURATION_DESC -> stringResource(R.string.sort_duration_desc)
+                                                VideoSortMode.DURATION_ASC -> stringResource(R.string.sort_duration_asc)
+                                                VideoSortMode.SIZE_DESC -> stringResource(R.string.sort_size_desc)
+                                                VideoSortMode.SIZE_ASC -> stringResource(R.string.sort_size_asc)
                                             }
                                             Text(text)
                                         },
@@ -211,7 +213,7 @@ fun VideoGridScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "Continue Watching",
+                            text = stringResource(R.string.continue_watching),
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(horizontal = 4.dp)
                         )
@@ -248,7 +250,7 @@ fun VideoGridScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = "No matching videos found",
+                                text = stringResource(R.string.no_local_videos),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

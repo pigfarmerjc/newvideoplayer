@@ -2,6 +2,8 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.stringResource
+import com.pigfarmerjc.galleryplayer.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -47,7 +49,7 @@ fun ImageGridScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CircularProgressIndicator()
-                Text("Loading local images...", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.loading_images), style = MaterialTheme.typography.bodyMedium)
             }
         }
         return
@@ -64,7 +66,7 @@ fun ImageGridScreen(
                 modifier = Modifier.padding(24.dp)
             ) {
                 Text(
-                    text = "Failed to load images",
+                    text = stringResource(R.string.failed_to_load_images),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -76,9 +78,9 @@ fun ImageGridScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.retry))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }
@@ -95,19 +97,19 @@ fun ImageGridScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "No local images found",
+                    text = stringResource(R.string.no_images),
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "Add images to your device and refresh",
+                    text = stringResource(R.string.add_images_to_device),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.scan))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Refresh")
+                    Text(stringResource(R.string.scan))
                 }
             }
         }
