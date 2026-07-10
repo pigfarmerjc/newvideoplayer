@@ -7,6 +7,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
+import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
 
 @Composable
 fun HomeScreen(
@@ -18,7 +20,7 @@ fun HomeScreen(
     onImageClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit,
     onReload: () -> Unit,
     mediaRepositoryCount: Int,
-    playbackEngine: com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine,
+    playbackEngine: PlaybackEngine,
     isLoadingMedia: Boolean,
     mediaLoadError: String?,
     playbackProgressMap: Map<String, Float>,
@@ -32,7 +34,17 @@ fun HomeScreen(
     onVideoSortModeChange: (VideoSortMode) -> Unit,
     folderSortMode: FolderSortMode,
     onFolderSortModeChange: (FolderSortMode) -> Unit,
-    continueWatchingVideos: List<LocalMediaItem>
+    continueWatchingVideos: List<LocalMediaItem>,
+    lastRefreshDurationMs: Long,
+    mediaStoreVolumes: List<String>,
+    safAuthorizedFolders: List<String>,
+    lastPlayedUri: String,
+    lastPlayedTitle: String,
+    lastPlayedSize: Long,
+    decoderModeState: DecoderMode,
+    onDecoderModeChange: (DecoderMode) -> Unit,
+    onAddSafFolder: (String) -> Unit,
+    onRemoveSafFolder: (String) -> Unit
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -118,7 +130,20 @@ fun HomeScreen(
                         defaultSpeed = defaultSpeed,
                         skipSeconds = skipSeconds,
                         onDefaultSpeedChange = onDefaultSpeedChange,
-                        onSkipSecondsChange = onSkipSecondsChange
+                        onSkipSecondsChange = onSkipSecondsChange,
+                        lastRefreshDurationMs = lastRefreshDurationMs,
+                        mediaStoreVolumes = mediaStoreVolumes,
+                        safAuthorizedFolders = safAuthorizedFolders,
+                        lastPlayedUri = lastPlayedUri,
+                        lastPlayedTitle = lastPlayedTitle,
+                        lastPlayedSize = lastPlayedSize,
+                        decoderModeState = decoderModeState,
+                        onDecoderModeChange = onDecoderModeChange,
+                        onAddSafFolder = onAddSafFolder,
+                        onRemoveSafFolder = onRemoveSafFolder,
+                        videosCount = videos.size,
+                        imagesCount = images.size,
+                        foldersCount = folders.size
                     )
                 }
             }

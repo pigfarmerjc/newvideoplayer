@@ -50,6 +50,7 @@ dependencies {
     implementation(project(":core-model"))
     implementation(project(":core-database"))
     implementation(project(":core-storage"))
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
 

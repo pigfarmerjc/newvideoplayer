@@ -1,7 +1,11 @@
 package com.pigfarmerjc.galleryplayer
 
+
 import android.app.Application
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -25,48 +29,16 @@ import com.pigfarmerjc.galleryplayer.core.database.GalleryDatabase
 import com.pigfarmerjc.galleryplayer.core.database.repository.RoomMediaRepository
 import com.pigfarmerjc.galleryplayer.core.database.repository.RoomPlaybackHistoryRepository
 import com.pigfarmerjc.galleryplayer.core.model.ScanState
+import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackState
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcPlaybackEngine
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-fun LocalMediaItem.toMediaItem(): com.pigfarmerjc.galleryplayer.core.model.MediaItem {
-    return com.pigfarmerjc.galleryplayer.core.model.MediaItem(
-        databaseId = 0L,
-        contentUri = this.contentUri,
-        mediaType = this.mediaType,
-        volumeName = this.volumeName,
-        mediaStoreId = this.mediaStoreId,
-        relativePath = this.relativePath,
-        displayName = this.displayName,
-        mimeType = this.mimeType,
-        fileSize = this.fileSize,
-        durationMs = this.durationMs,
-        width = this.width,
-        height = this.height,
-        rotationDegrees = null,
-        dateAddedEpochSeconds = null,
-        dateModifiedEpochSeconds = this.dateModifiedEpochSeconds,
-        dateTakenEpochMillis = null,
-        videoCodec = null,
-        audioCodec = null,
-        audioSampleFormat = null,
-        audioSampleRate = null,
-        audioChannels = null,
-        frameRate = null,
-        bitrate = null,
-        isHdr = false,
-        isGif = this.isGif,
-        isFavorite = false,
-        isHidden = false,
-        scanState = ScanState.SCANNED,
-        lastError = null
-    )
-}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playbackEngine: PlaybackEngine = LibVlcPlaybackEngine(application)
@@ -83,6 +55,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var isLoadingMedia by mutableStateOf(false)
     var mediaLoadError by mutableStateOf<String?>(null)
     var mediaRepositoryCount by mutableStateOf(0)
+
+    // Diagnostics metrics
+    var lastRefreshDurationMs by mutableStateOf(0L)
+    var mediaStoreVolumes by mutableStateOf<List<String>>(emptyList())
+    var safAuthorizedFolders by mutableStateOf<List<String>>(emptyList())
+    
+    // Last playback info
+    var lastPlayedUri by mutableStateOf("")
+    var lastPlayedTitle by mutableStateOf("")
+    var lastPlayedSize by mutableStateOf(0L)
+    var decoderModeState by mutableStateOf(DecoderMode.AUTO)
 
     // DB Repositories
     private val database by lazy { GalleryDatabase.getDatabase(application) }
@@ -126,6 +109,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val playbackPrefs = application.getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
         repeatModeState = PlaybackRepeatMode.valueOf(playbackPrefs.getString("repeat_mode", PlaybackRepeatMode.NONE.name) ?: PlaybackRepeatMode.NONE.name)
+        decoderModeState = DecoderMode.valueOf(playbackPrefs.getString("decoder_mode", DecoderMode.AUTO.name) ?: DecoderMode.AUTO.name)
+        playbackEngine.setDecoderMode(decoderModeState)
+
+        val safPrefs = application.getSharedPreferences("saf_settings", android.content.Context.MODE_PRIVATE)
+        safAuthorizedFolders = safPrefs.getStringSet("authorized_folders", emptySet())?.toList() ?: emptyList()
 
         // Stream playback history changes to the progress map
         viewModelScope.launch {
@@ -143,6 +131,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _playbackProgressMap.value = map
             }
         }
+    }
+
+    fun addSafFolder(uriString: String, context: android.content.Context) {
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                android.net.Uri.parse(uriString),
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Could not take persistable permission: ${e.message}")
+        }
+        val currentSet = safAuthorizedFolders.toMutableSet()
+        currentSet.add(uriString)
+        safAuthorizedFolders = currentSet.toList()
+        getApplication<Application>().getSharedPreferences("saf_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putStringSet("authorized_folders", currentSet).apply()
+    }
+
+    fun removeSafFolder(uriString: String, context: android.content.Context) {
+        try {
+            context.contentResolver.releasePersistableUriPermission(
+                android.net.Uri.parse(uriString),
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Could not release permission: ${e.message}")
+        }
+        val currentSet = safAuthorizedFolders.toMutableSet()
+        currentSet.remove(uriString)
+        safAuthorizedFolders = currentSet.toList()
+        getApplication<Application>().getSharedPreferences("saf_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putStringSet("authorized_folders", currentSet).apply()
     }
 
     fun updateDefaultSpeed(speed: Float) {
@@ -175,7 +195,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .edit().putString("repeat_mode", mode.name).apply()
     }
 
+    fun updateDecoderMode(mode: DecoderMode) {
+        decoderModeState = mode
+        playbackEngine.setDecoderMode(mode)
+        getApplication<Application>().getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("decoder_mode", mode.name).apply()
+    }
+
     fun startPlaybackSession(video: LocalMediaItem) {
+        lastPlayedUri = video.contentUri
+        lastPlayedTitle = video.displayName
+        lastPlayedSize = video.fileSize
+
         viewModelScope.launch(Dispatchers.IO) {
             // First persist media item to prevent FK violation
             val domainItem = video.toMediaItem()
@@ -225,13 +256,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mediaLoadError = null
 
             try {
-                // If only video permission is granted, query videos
-                val hasVideo = PermissionState.hasVideoPermission(context)
-                val v = if (hasVideo) MediaStoreHelper.queryLocalVideos(context) else emptyList()
+                val startTime = System.currentTimeMillis()
 
-                // If only image permission is granted, query images
-                val hasImages = PermissionState.hasImagesPermission(context)
-                val img = if (hasImages) MediaStoreHelper.queryLocalImages(context) else emptyList()
+                // Query all external volumes
+                val volumes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        MediaStore.getExternalVolumeNames(context).toList()
+                    } catch (e: Exception) {
+                        listOf("external")
+                    }
+                } else {
+                    listOf("external")
+                }
+                mediaStoreVolumes = volumes
+
+                val v = mutableListOf<LocalMediaItem>()
+                for (volume in volumes) {
+                    try {
+                        val uri = MediaStore.Video.Media.getContentUri(volume)
+                        v.addAll(MediaStoreHelper.queryVideosForUri(context, uri, volume))
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                }
+
+                val img = mutableListOf<LocalMediaItem>()
+                for (volume in volumes) {
+                    try {
+                        val uri = MediaStore.Images.Media.getContentUri(volume)
+                        img.addAll(MediaStoreHelper.queryImagesForUri(context, uri, volume))
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                }
+
+                // Query SAF directories
+                for (safUriString in safAuthorizedFolders) {
+                    try {
+                        v.addAll(MediaStoreHelper.querySafVideos(context, safUriString))
+                    } catch (e: Exception) {
+                        // ignore
+                    }
+                }
 
                 videosList.clear()
                 videosList.addAll(v)
@@ -243,7 +309,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val f = v.groupBy { it.relativePath }.map { (path, items) ->
                     val folderName = path.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
                     FolderItem(
-                        volumeName = "external",
+                        volumeName = items.firstOrNull()?.volumeName ?: "external",
                         relativePath = path,
                         displayName = folderName,
                         videoCount = items.size,
@@ -255,8 +321,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 foldersList.addAll(f)
 
                 mediaRepositoryCount = v.size + img.size
+                lastRefreshDurationMs = System.currentTimeMillis() - startTime
+
+                android.widget.Toast.makeText(context, "媒体库已刷新", android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                mediaLoadError = e.localizedMessage ?: "Failed to read local storage"
+                mediaLoadError = e.localizedMessage ?: "Failed to read storage"
+                android.widget.Toast.makeText(context, "刷新失败: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
             } finally {
                 isLoadingMedia = false
             }
@@ -372,7 +442,17 @@ class MainActivity : ComponentActivity() {
                                     onVideoSortModeChange = { viewModel.updateVideoSortMode(it) },
                                     folderSortMode = viewModel.folderSortMode,
                                     onFolderSortModeChange = { viewModel.updateFolderSortMode(it) },
-                                    continueWatchingVideos = viewModel.continueWatchingList.value
+                                    continueWatchingVideos = viewModel.continueWatchingList.value,
+                                    lastRefreshDurationMs = viewModel.lastRefreshDurationMs,
+                                    mediaStoreVolumes = viewModel.mediaStoreVolumes,
+                                    safAuthorizedFolders = viewModel.safAuthorizedFolders,
+                                    lastPlayedUri = viewModel.lastPlayedUri,
+                                    lastPlayedTitle = viewModel.lastPlayedTitle,
+                                    lastPlayedSize = viewModel.lastPlayedSize,
+                                    decoderModeState = viewModel.decoderModeState,
+                                    onDecoderModeChange = { viewModel.updateDecoderMode(it) },
+                                    onAddSafFolder = { viewModel.addSafFolder(it, context) },
+                                    onRemoveSafFolder = { viewModel.removeSafFolder(it, context) }
                                 )
                             }
                             is Screen.FolderVideos -> {
