@@ -17,14 +17,13 @@ import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
 fun SettingsScreen(
     onReload: () -> Unit,
     mediaRepositoryCount: Int,
-    playbackEngine: PlaybackEngine
+    playbackEngine: PlaybackEngine,
+    defaultSpeed: Float,
+    skipSeconds: Int,
+    onDefaultSpeedChange: (Float) -> Unit,
+    onSkipSecondsChange: (Int) -> Unit
 ) {
     var showDebugDialog by remember { mutableStateOf(false) }
-
-    // Memory settings states
-    var defaultSpeed by remember { mutableStateOf(1.0f) }
-    var skipSeconds by remember { mutableStateOf(10) }
-
     val diagnostics by playbackEngine.diagnostics.collectAsState()
 
     Column(
@@ -78,8 +77,7 @@ fun SettingsScreen(
                                 DropdownMenuItem(
                                     text = { Text("${speedOption}x") },
                                     onClick = {
-                                        defaultSpeed = speedOption
-                                        playbackEngine.setSpeed(speedOption)
+                                        onDefaultSpeedChange(speedOption)
                                         speedExpanded = false
                                     }
                                 )
@@ -112,7 +110,7 @@ fun SettingsScreen(
                                 DropdownMenuItem(
                                     text = { Text("${skipOption}s") },
                                     onClick = {
-                                        skipSeconds = skipOption
+                                        onSkipSecondsChange(skipOption)
                                         skipExpanded = false
                                     }
                                 )

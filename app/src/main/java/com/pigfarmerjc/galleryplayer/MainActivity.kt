@@ -93,7 +93,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _playbackProgressMap = mutableStateOf<Map<String, Float>>(emptyMap())
     val playbackProgressMap: State<Map<String, Float>> get() = _playbackProgressMap
 
+    // Persistent settings states
+    var defaultSpeed by mutableStateOf(1.0f)
+    var skipSeconds by mutableStateOf(10)
+
     init {
+        val sharedPrefs = application.getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
+        defaultSpeed = sharedPrefs.getFloat("default_speed", 1.0f)
+        skipSeconds = sharedPrefs.getInt("skip_seconds", 10)
+
         // Stream playback history changes to the progress map
         viewModelScope.launch {
             historyRepository.getHistory().collect { list ->
@@ -109,6 +117,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _playbackProgressMap.value = map
             }
         }
+    }
+
+    fun updateDefaultSpeed(speed: Float) {
+        defaultSpeed = speed
+        getApplication<Application>().getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putFloat("default_speed", speed).apply()
+    }
+
+    fun updateSkipSeconds(seconds: Int) {
+        skipSeconds = seconds
+        getApplication<Application>().getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putInt("skip_seconds", seconds).apply()
     }
 
     fun startPlaybackSession(video: LocalMediaItem) {
@@ -297,7 +317,11 @@ class MainActivity : ComponentActivity() {
                                     playbackEngine = viewModel.playbackEngine,
                                     isLoadingMedia = viewModel.isLoadingMedia,
                                     mediaLoadError = viewModel.mediaLoadError,
-                                    playbackProgressMap = viewModel.playbackProgressMap.value
+                                    playbackProgressMap = viewModel.playbackProgressMap.value,
+                                    defaultSpeed = viewModel.defaultSpeed,
+                                    skipSeconds = viewModel.skipSeconds,
+                                    onDefaultSpeedChange = { viewModel.updateDefaultSpeed(it) },
+                                    onSkipSecondsChange = { viewModel.updateSkipSeconds(it) }
                                 )
                             }
                             is Screen.FolderVideos -> {
@@ -392,7 +416,9 @@ class MainActivity : ComponentActivity() {
                                                 viewModel.playbackEngine.playbackSpeed.value
                                             )
                                         }
-                                    }
+                                    },
+                                    defaultSpeed = viewModel.defaultSpeed,
+                                    skipSeconds = viewModel.skipSeconds
                                 )
                             }
                             is Screen.ImageViewer -> {

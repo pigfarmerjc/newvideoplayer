@@ -21,7 +21,11 @@ fun HomeScreen(
     playbackEngine: com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine,
     isLoadingMedia: Boolean,
     mediaLoadError: String?,
-    playbackProgressMap: Map<String, Float>
+    playbackProgressMap: Map<String, Float>,
+    defaultSpeed: Float,
+    skipSeconds: Int,
+    onDefaultSpeedChange: (Float) -> Unit,
+    onSkipSecondsChange: (Int) -> Unit
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -95,7 +99,11 @@ fun HomeScreen(
                     SettingsScreen(
                         onReload = onReload,
                         mediaRepositoryCount = mediaRepositoryCount,
-                        playbackEngine = playbackEngine
+                        playbackEngine = playbackEngine,
+                        defaultSpeed = defaultSpeed,
+                        skipSeconds = skipSeconds,
+                        onDefaultSpeedChange = onDefaultSpeedChange,
+                        onSkipSecondsChange = onSkipSecondsChange
                     )
                 }
             }

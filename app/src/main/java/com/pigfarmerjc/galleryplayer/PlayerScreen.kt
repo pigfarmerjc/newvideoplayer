@@ -1,10 +1,16 @@
 package com.pigfarmerjc.galleryplayer
 
 import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -13,12 +19,30 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.pigfarmerjc.galleryplayer.core.player.api.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private fun Context.findActivity(): ComponentActivity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is ComponentActivity) return context
+        context = context.baseContext
+    }
+    return null
+}
 
 @Composable
 fun PlayerScreen(
@@ -32,10 +56,13 @@ fun PlayerScreen(
     onBack: () -> Unit,
     initialPositionMs: Long,
     onPlaybackProgress: (positionMs: Long, durationMs: Long, completed: Boolean) -> Unit,
-    onPlaybackSessionStart: () -> Unit
+    onPlaybackSessionStart: () -> Unit,
+    defaultSpeed: Float,
+    skipSeconds: Int
 ) {
     val coroutineScope = rememberCoroutineScope()
-    
+    val context = LocalContext.current
+
     // Collect playback states
     val state by playbackEngine.playbackState.collectAsState()
     val position by playbackEngine.positionMs.collectAsState()
@@ -47,8 +74,9 @@ fun PlayerScreen(
     var isDragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableStateOf(0f) }
 
-    // Gesture states
-    var originalSpeed by remember { mutableStateOf(1.0f) }
+    // Multi-speed level separation
+    var currentSpeed by remember(videoUri) { mutableStateOf(defaultSpeed) }
+    var hasAppliedDefaultSpeed by remember(videoUri) { mutableStateOf(false) }
 
     // Keep track of the active video output host
     var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
@@ -59,8 +87,18 @@ fun PlayerScreen(
     // Protect playCount increment from pausing/resuming repeatedly
     var hasStartedSession by remember(videoUri) { mutableStateOf(false) }
 
-    // Intercept hardware back button
-    BackHandler {
+    // Drag gesture tracking states
+    var dragOffsetX by remember { mutableStateOf(0f) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+    var dragDirection by remember { mutableStateOf(DragDirection.Undecided) }
+
+    val density = LocalDensity.current
+    val horizontalThresholdPx = remember { with(density) { 100.dp.toPx() } }
+    val verticalThresholdPx = remember { with(density) { 140.dp.toPx() } }
+    val lockThresholdPx = remember { with(density) { 10.dp.toPx() } }
+
+    // Safe save helper
+    val saveProgressAndStop = {
         val currentPos = playbackEngine.positionMs.value
         val dur = playbackEngine.durationMs.value
         if (dur > 0) {
@@ -68,10 +106,34 @@ fun PlayerScreen(
             onPlaybackProgress(currentPos, dur, isFinished)
         }
         playbackEngine.stop()
+    }
+
+    // Full-screen immersive window setup
+    DisposableEffect(videoUri) {
+        val activity = context.findActivity()
+        val window = activity?.window
+        if (window != null) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        onDispose {
+            if (window != null) {
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    // Intercept hardware back button
+    BackHandler {
+        saveProgressAndStop()
         onBack()
     }
 
-    // Auto-hide controls after 3 seconds of inactivity
+    // Auto-hide controls after 3 seconds of inactivity (paused when dragging or speed dialog open)
     LaunchedEffect(controlsVisible, isDragging, state) {
         if (controlsVisible && !isDragging && state == PlaybackState.Playing) {
             delay(3000)
@@ -84,6 +146,14 @@ fun PlayerScreen(
         val host = videoHost
         if (host != null) {
             playbackEngine.open(android.net.Uri.parse(videoUri))
+        }
+    }
+
+    // Apply speed once playing starts
+    LaunchedEffect(state) {
+        if (state == PlaybackState.Playing && !hasAppliedDefaultSpeed) {
+            playbackEngine.setSpeed(currentSpeed)
+            hasAppliedDefaultSpeed = true
         }
     }
 
@@ -134,14 +204,17 @@ fun PlayerScreen(
         }
     }
 
-
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .graphicsLayer {
+                // Apply translation downward displacement for reactive swipe down interaction
+                if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
+                    translationY = dragOffsetY
+                }
+            }
     ) {
-
         AndroidView(
             factory = { ctx ->
                 val host = videoOutputFactory.create(ctx)
@@ -157,11 +230,11 @@ fun PlayerScreen(
             }
         )
 
-
+        // Gesture Overlay Detector Area
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(speed) {
+                .pointerInput(speed, skipSeconds, currentSpeed) {
                     detectTapGestures(
                         onTap = {
                             controlsVisible = !controlsVisible
@@ -170,10 +243,11 @@ fun PlayerScreen(
                             val currentPos = playbackEngine.positionMs.value
                             val dur = playbackEngine.durationMs.value
                             val isLeft = offset.x < size.width / 2
+                            val skipOffset = skipSeconds * 1000L
                             if (isLeft) {
-                                playbackEngine.seekTo(maxOf(currentPos - 10000L, 0L))
+                                playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
                             } else {
-                                playbackEngine.seekTo(minOf(currentPos + 10000L, dur))
+                                playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
                             }
                         },
                         onPress = {
@@ -181,19 +255,101 @@ fun PlayerScreen(
                             val job = coroutineScope.launch {
                                 delay(500)
                                 isLongPress = true
-                                originalSpeed = speed
                                 playbackEngine.setSpeed(2.0f)
                             }
                             tryAwaitRelease()
                             job.cancel()
                             if (isLongPress) {
-                                playbackEngine.setSpeed(originalSpeed)
+                                playbackEngine.setSpeed(currentSpeed)
                             }
                         }
                     )
                 }
-        )
+                .pointerInput(currentIndex, videoList.size) {
+                    detectDragGestures(
+                        onDragStart = {
+                            dragOffsetX = 0f
+                            dragOffsetY = 0f
+                            dragDirection = DragDirection.Undecided
+                        },
+                        onDrag = { change, dragAmount ->
+                            // Avoid registering drag if we're touching active seekbar or buttons (handled by click checks)
+                            dragOffsetX += dragAmount.x
+                            dragOffsetY += dragAmount.y
 
+                            val absX = abs(dragOffsetX)
+                            val absY = abs(dragOffsetY)
+
+                            if (dragDirection == DragDirection.Undecided) {
+                                if (absX > lockThresholdPx || absY > lockThresholdPx) {
+                                    dragDirection = if (absX > absY) {
+                                        DragDirection.Horizontal
+                                    } else {
+                                        DragDirection.Vertical
+                                    }
+                                }
+                            }
+
+                            if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
+                                change.consume()
+                            } else if (dragDirection == DragDirection.Horizontal) {
+                                change.consume()
+                            }
+                        },
+                        onDragEnd = {
+                            val action = PlayerGestureState.determineAction(
+                                dragOffsetX = dragOffsetX,
+                                dragOffsetY = dragOffsetY,
+                                horizontalThresholdPx = horizontalThresholdPx,
+                                verticalThresholdPx = verticalThresholdPx,
+                                currentIndex = currentIndex,
+                                lastIndex = videoList.size - 1
+                            )
+
+                            when (action) {
+                                PlayerDragAction.Previous -> {
+                                    saveProgressAndStop()
+                                    onChangeVideo(currentIndex - 1)
+                                }
+                                PlayerDragAction.Next -> {
+                                    saveProgressAndStop()
+                                    onChangeVideo(currentIndex + 1)
+                                }
+                                PlayerDragAction.Dismiss -> {
+                                    saveProgressAndStop()
+                                    onBack()
+                                }
+                                PlayerDragAction.None -> {
+                                    if (dragDirection == DragDirection.Vertical) {
+                                        // Snap back to original position
+                                        coroutineScope.launch {
+                                            val anim = Animatable(dragOffsetY)
+                                            anim.animateTo(0f, animationSpec = spring()) {
+                                                dragOffsetY = value
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            dragOffsetX = 0f
+                            dragOffsetY = 0f
+                            dragDirection = DragDirection.Undecided
+                        },
+                        onDragCancel = {
+                            coroutineScope.launch {
+                                val anim = Animatable(dragOffsetY)
+                                anim.animateTo(0f) {
+                                    dragOffsetY = value
+                                }
+                            }
+                            dragOffsetX = 0f
+                            dragOffsetY = 0f
+                            dragDirection = DragDirection.Undecided
+                        }
+                    )
+                }
+        )
 
         if (controlsVisible) {
             // Top Bar
@@ -206,13 +362,7 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
-                    val currentPos = playbackEngine.positionMs.value
-                    val dur = playbackEngine.durationMs.value
-                    if (dur > 0) {
-                        val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
-                        onPlaybackProgress(currentPos, dur, isFinished)
-                    }
-                    playbackEngine.stop()
+                    saveProgressAndStop()
                     onBack()
                 }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
@@ -235,18 +385,13 @@ fun PlayerScreen(
                     .align(Alignment.BottomCenter),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Seekbar
+                // Seekbar and time layout
                 val sliderValue = if (isDragging) dragPosition else position.toFloat()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = formatTime(sliderValue.toLong()),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodySmall
-                    )
                     Slider(
                         value = sliderValue,
                         onValueChange = {
@@ -262,7 +407,7 @@ fun PlayerScreen(
                         modifier = Modifier.weight(1f)
                     )
                     Text(
-                        text = formatTime(duration),
+                        text = "${formatTime(sliderValue.toLong())} / ${formatTime(duration)}",
                         color = Color.White,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -278,65 +423,79 @@ fun PlayerScreen(
                     val hasPrev = currentIndex > 0
                     IconButton(
                         onClick = {
-                            val currentPos = playbackEngine.positionMs.value
-                            val dur = playbackEngine.durationMs.value
-                            if (dur > 0) {
-                                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
-                                onPlaybackProgress(currentPos, dur, isFinished)
-                            }
-                            playbackEngine.stop()
+                            saveProgressAndStop()
                             onChangeVideo(currentIndex - 1)
                         },
                         enabled = hasPrev
                     ) {
-                        Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = if (hasPrev) Color.White else Color.Gray)
+                        Icon(
+                            imageVector = Icons.Filled.SkipPrevious,
+                            contentDescription = "Previous",
+                            tint = if (hasPrev) Color.White else Color.Gray,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
 
-                    // Seek Backward 10s
-                    IconButton(onClick = {
-                        playbackEngine.seekTo(maxOf(position - 10000L, 0L))
+                    // Seek Backward Custom Seconds
+                    TextButton(onClick = {
+                        playbackEngine.seekTo(maxOf(position - skipSeconds * 1000L, 0L))
                     }) {
-                        Icon(Icons.Filled.Replay10, contentDescription = "Rewind 10s", tint = Color.White)
+                        Text(
+                            text = "-${skipSeconds}s",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
 
-                    // Play / Pause Toggle
-                    IconButton(onClick = {
-                        if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
-                    }) {
+                    // Play / Pause Toggle (Enlarged)
+                    IconButton(
+                        onClick = {
+                            if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
+                        },
+                        modifier = Modifier.size(64.dp)
+                    ) {
                         val icon = if (state == PlaybackState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow
-                        Icon(icon, contentDescription = "Play/Pause", tint = Color.White)
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = "Play/Pause",
+                            tint = Color.White,
+                            modifier = Modifier.size(40.dp)
+                        )
                     }
 
-                    // Seek Forward 10s
-                    IconButton(onClick = {
-                        playbackEngine.seekTo(minOf(position + 10000L, duration))
+                    // Seek Forward Custom Seconds
+                    TextButton(onClick = {
+                        playbackEngine.seekTo(minOf(position + skipSeconds * 1000L, duration))
                     }) {
-                        Icon(Icons.Filled.Forward10, contentDescription = "Forward 10s", tint = Color.White)
+                        Text(
+                            text = "+${skipSeconds}s",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
 
                     // Next Button
                     val hasNext = currentIndex < videoList.size - 1
                     IconButton(
                         onClick = {
-                            val currentPos = playbackEngine.positionMs.value
-                            val dur = playbackEngine.durationMs.value
-                            if (dur > 0) {
-                                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
-                                onPlaybackProgress(currentPos, dur, isFinished)
-                            }
-                            playbackEngine.stop()
+                            saveProgressAndStop()
                             onChangeVideo(currentIndex + 1)
                         },
                         enabled = hasNext
                     ) {
-                        Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = if (hasNext) Color.White else Color.Gray)
+                        Icon(
+                            imageVector = Icons.Filled.SkipNext,
+                            contentDescription = "Next",
+                            tint = if (hasNext) Color.White else Color.Gray,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
 
                     // Speed selector
                     var speedExpanded by remember { mutableStateOf(false) }
                     Box {
                         Button(onClick = { speedExpanded = true }) {
-                            Text("Speed: ${speed}x")
+                            Text("${currentSpeed}x")
                         }
                         DropdownMenu(
                             expanded = speedExpanded,
@@ -346,6 +505,7 @@ fun PlayerScreen(
                                 DropdownMenuItem(
                                     text = { Text("${s}x") },
                                     onClick = {
+                                        currentSpeed = s
                                         playbackEngine.setSpeed(s)
                                         speedExpanded = false
                                     }
