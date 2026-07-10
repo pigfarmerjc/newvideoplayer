@@ -24,8 +24,12 @@ import androidx.compose.ui.layout.ContentScale
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 object ThumbnailCache {
+    val hitCount = AtomicInteger(0)
+    val missCount = AtomicInteger(0)
+
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = maxMemory / 8 // Use 1/8th of available VM memory for bitmap caching
 
@@ -35,10 +39,24 @@ object ThumbnailCache {
         }
     }
 
-    fun get(key: String): Bitmap? = cache.get(key)
+    fun get(key: String): Bitmap? {
+        val bitmap = cache.get(key)
+        if (bitmap != null) {
+            hitCount.incrementAndGet()
+        } else {
+            missCount.incrementAndGet()
+        }
+        return bitmap
+    }
     
     fun put(key: String, bitmap: Bitmap) {
         cache.put(key, bitmap)
+    }
+
+    fun clear() {
+        cache.evictAll()
+        hitCount.set(0)
+        missCount.set(0)
     }
 }
 
@@ -48,8 +66,8 @@ object ThumbnailLoader {
         context: Context,
         contentUri: String,
         mediaType: MediaType,
-        width: Int = 320,
-        height: Int = 240
+        width: Int,
+        height: Int
     ): Bitmap? = withContext(Dispatchers.IO) {
         val cacheKey = "${contentUri}_${width}_${height}"
         val cached = ThumbnailCache.get(cacheKey)
@@ -60,6 +78,7 @@ object ThumbnailLoader {
         return@withContext try {
             val uri = Uri.parse(contentUri)
             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // If it is an SAF URI, loadThumbnail works on Android 10+
                 context.contentResolver.loadThumbnail(uri, Size(width, height), null)
             } else {
                 val id = uri.lastPathSegment?.toLongOrNull() ?: return@withContext null
@@ -93,17 +112,21 @@ object ThumbnailLoader {
 fun MediaThumbnail(
     contentUri: String,
     mediaType: MediaType,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    width: Int = 320,
+    height: Int = 180
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var bitmap by remember(contentUri) { mutableStateOf<Bitmap?>(null) }
-    var loaded by remember(contentUri) { mutableStateOf(false) }
+    var bitmap by remember(contentUri, width, height) { mutableStateOf<Bitmap?>(null) }
+    var loaded by remember(contentUri, width, height) { mutableStateOf(false) }
 
-    LaunchedEffect(contentUri) {
+    LaunchedEffect(contentUri, width, height) {
         val result = ThumbnailLoader.loadMediaThumbnail(
             context,
             contentUri,
-            mediaType
+            mediaType,
+            width,
+            height
         )
         bitmap = result
         loaded = true

@@ -220,7 +220,10 @@ fun VideoGridScreen(
                             contentPadding = PaddingValues(horizontal = 4.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(continueWatchingVideos) { video ->
+                            items(
+                                items = continueWatchingVideos,
+                                key = { it.contentUri }
+                            ) { video ->
                                 val progressRatio = playbackProgressMap[video.contentUri]
                                 ContinueWatchingCard(
                                     video = video,
@@ -253,7 +256,10 @@ fun VideoGridScreen(
                     }
                 }
             } else {
-                items(filteredVideos) { video ->
+                items(
+                    items = filteredVideos,
+                    key = { it.contentUri }
+                ) { video ->
                     VideoCard(
                         video = video,
                         progressRatio = playbackProgressMap[video.contentUri],
@@ -288,7 +294,9 @@ fun ContinueWatchingCard(
                 MediaThumbnail(
                     contentUri = video.contentUri,
                     mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    width = 320,
+                    height = 180
                 )
 
                 // Overlay active linear progress indicator at the bottom of the thumbnail
@@ -338,7 +346,9 @@ fun VideoCard(
                 MediaThumbnail(
                     contentUri = video.contentUri,
                     mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    width = 320,
+                    height = 180
                 )
                 
                 if (video.durationMs != null) {

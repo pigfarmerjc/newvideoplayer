@@ -206,7 +206,10 @@ fun FolderScreen(
                     .fillMaxSize()
                     .weight(1f)
             ) {
-                items(sortedFolders) { folder ->
+                items(
+                    items = sortedFolders,
+                    key = { it.relativePath }
+                ) { folder ->
                     FolderCard(
                         folder = folder,
                         onClick = { onFolderClick(folder) }
@@ -240,7 +243,9 @@ fun FolderCard(
                     MediaThumbnail(
                         contentUri = folder.coverUri,
                         mediaType = MediaType.VIDEO,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        width = 320,
+                        height = 200
                     )
                 } else {
                     Box(

@@ -132,7 +132,10 @@ fun ImageGridScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize().weight(1f)
             ) {
-                items(images) { image ->
+                items(
+                    items = images,
+                    key = { it.contentUri }
+                ) { image ->
                     ImageCard(
                         image = image,
                         onClick = { onImageClick(image, images) }
@@ -165,7 +168,9 @@ fun ImageCard(
                 MediaThumbnail(
                     contentUri = image.contentUri,
                     mediaType = if (image.isGif) MediaType.GIF else MediaType.IMAGE,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    width = 256,
+                    height = 256
                 )
 
                 if (image.isGif) {
