@@ -8,8 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,42 +38,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val videosList = mutableStateListOf<LocalMediaItem>()
     val imagesList = mutableStateListOf<LocalMediaItem>()
     val foldersList = mutableStateListOf<FolderItem>()
+    
+    // Hardening Sprint loader states
     var permissionsGranted by mutableStateOf(false)
+    var isLoadingMedia by mutableStateOf(false)
+    var mediaLoadError by mutableStateOf<String?>(null)
     var mediaRepositoryCount by mutableStateOf(0)
 
     fun refreshLocalMedia(context: android.content.Context) {
         viewModelScope.launch {
-            if (!PermissionState.hasPermissions(context)) {
+            if (!PermissionState.hasAnyStoragePermission(context)) {
                 permissionsGranted = false
                 return@launch
             }
             permissionsGranted = true
+            isLoadingMedia = true
+            mediaLoadError = null
 
-            val v = MediaStoreHelper.queryLocalVideos(context)
-            val img = MediaStoreHelper.queryLocalImages(context)
+            try {
+                // If only video permission is granted, query videos
+                val hasVideo = PermissionState.hasVideoPermission(context)
+                val v = if (hasVideo) MediaStoreHelper.queryLocalVideos(context) else emptyList()
 
-            videosList.clear()
-            videosList.addAll(v)
+                // If only image permission is granted, query images
+                val hasImages = PermissionState.hasImagesPermission(context)
+                val img = if (hasImages) MediaStoreHelper.queryLocalImages(context) else emptyList()
 
-            imagesList.clear()
-            imagesList.addAll(img)
+                videosList.clear()
+                videosList.addAll(v)
 
-            // Recompute folders aggregate
-            val f = v.groupBy { it.relativePath }.map { (path, items) ->
-                val folderName = path.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
-                FolderItem(
-                    volumeName = "external",
-                    relativePath = path,
-                    displayName = folderName,
-                    videoCount = items.size,
-                    coverUri = items.firstOrNull()?.contentUri,
-                    totalSize = items.sumOf { it.fileSize }
-                )
+                imagesList.clear()
+                imagesList.addAll(img)
+
+                // Recompute folders aggregate
+                val f = v.groupBy { it.relativePath }.map { (path, items) ->
+                    val folderName = path.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
+                    FolderItem(
+                        volumeName = "external",
+                        relativePath = path,
+                        displayName = folderName,
+                        videoCount = items.size,
+                        coverUri = items.firstOrNull()?.contentUri,
+                        totalSize = items.sumOf { it.fileSize }
+                    )
+                }
+                foldersList.clear()
+                foldersList.addAll(f)
+
+                mediaRepositoryCount = v.size + img.size
+            } catch (e: Exception) {
+                mediaLoadError = e.localizedMessage ?: "Failed to read local storage"
+            } finally {
+                isLoadingMedia = false
             }
-            foldersList.clear()
-            foldersList.addAll(f)
-
-            mediaRepositoryCount = v.size + img.size
         }
     }
 
@@ -164,7 +181,9 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onReload = { viewModel.refreshLocalMedia(context) },
                                     mediaRepositoryCount = viewModel.mediaRepositoryCount,
-                                    playbackEngine = viewModel.playbackEngine
+                                    playbackEngine = viewModel.playbackEngine,
+                                    isLoadingMedia = viewModel.isLoadingMedia,
+                                    mediaLoadError = viewModel.mediaLoadError
                                 )
                             }
                             is Screen.FolderVideos -> {
@@ -179,7 +198,7 @@ class MainActivity : ComponentActivity() {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         IconButton(onClick = { screenStack.removeAt(screenStack.lastIndex) }) {
-                                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
@@ -200,7 +219,9 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                 )
                                             },
-                                            onRefresh = { viewModel.refreshLocalMedia(context) }
+                                            onRefresh = { viewModel.refreshLocalMedia(context) },
+                                            isLoading = viewModel.isLoadingMedia,
+                                            loadError = viewModel.mediaLoadError
                                         )
                                     }
                                 }
@@ -216,6 +237,16 @@ class MainActivity : ComponentActivity() {
                                     currentIndex = currentScreen.currentIndex,
                                     playbackEngine = viewModel.playbackEngine,
                                     videoOutputFactory = viewModel.videoOutputFactory,
+                                    onChangeVideo = { newIndex ->
+                                        // Update parent navigation state stack
+                                        val newItem = currentScreen.videoList[newIndex]
+                                        screenStack[screenStack.lastIndex] = Screen.Player(
+                                            videoUri = newItem.contentUri,
+                                            videoTitle = newItem.displayName,
+                                            videoList = currentScreen.videoList,
+                                            currentIndex = newIndex
+                                        )
+                                    },
                                     onBack = { screenStack.removeAt(screenStack.lastIndex) }
                                 )
                             }

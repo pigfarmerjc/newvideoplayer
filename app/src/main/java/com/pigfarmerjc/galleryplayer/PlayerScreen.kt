@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +28,7 @@ fun PlayerScreen(
     currentIndex: Int,
     playbackEngine: PlaybackEngine,
     videoOutputFactory: VideoOutputHostFactory,
+    onChangeVideo: (Int) -> Unit,
     onBack: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -45,6 +47,9 @@ fun PlayerScreen(
     // Gesture states
     var originalSpeed by remember { mutableStateOf(1.0f) }
 
+    // Keep track of the active video output host
+    var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
+
     // Intercept hardware back button
     BackHandler {
         playbackEngine.stop()
@@ -59,9 +64,12 @@ fun PlayerScreen(
         }
     }
 
-    // Open video on startup
-    LaunchedEffect(videoUri) {
-        playbackEngine.open(android.net.Uri.parse(videoUri))
+    // Open video only AFTER videoHost is attached
+    LaunchedEffect(videoUri, videoHost) {
+        val host = videoHost
+        if (host != null) {
+            playbackEngine.open(android.net.Uri.parse(videoUri))
+        }
     }
 
     Box(
@@ -69,24 +77,21 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. Video Surface view
-        if (state != PlaybackState.Idle && state != PlaybackState.Released) {
-            var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
-            AndroidView(
-                factory = { ctx ->
-                    val host = videoOutputFactory.create(ctx)
-                    videoHost = host
-                    playbackEngine.attachVideoOutput(host)
-                    host.view
-                },
-                modifier = Modifier.fillMaxSize(),
-                onRelease = {
-                    playbackEngine.detachVideoOutput()
-                    videoHost?.dispose()
-                    videoHost = null
-                }
-            )
-        }
+        // 1. Video Surface view is created immediately upon entering the player
+        AndroidView(
+            factory = { ctx ->
+                val host = videoOutputFactory.create(ctx)
+                videoHost = host
+                playbackEngine.attachVideoOutput(host)
+                host.view
+            },
+            modifier = Modifier.fillMaxSize(),
+            onRelease = {
+                playbackEngine.detachVideoOutput()
+                videoHost?.dispose()
+                videoHost = null
+            }
+        )
 
         // 2. Gesture Overlay Detector
         Box(
@@ -140,7 +145,7 @@ fun PlayerScreen(
                     playbackEngine.stop()
                     onBack()
                 }) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -203,29 +208,26 @@ fun PlayerScreen(
                     val hasPrev = currentIndex > 0
                     IconButton(
                         onClick = {
-                            val prevItem = videoList[currentIndex - 1]
                             playbackEngine.stop()
-                            coroutineScope.launch {
-                                playbackEngine.open(android.net.Uri.parse(prevItem.contentUri))
-                            }
+                            onChangeVideo(currentIndex - 1)
                         },
                         enabled = hasPrev
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Previous", tint = if (hasPrev) Color.White else Color.Gray)
+                        Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = if (hasPrev) Color.White else Color.Gray)
                     }
 
                     // Seek Backward 10s
                     IconButton(onClick = {
                         playbackEngine.seekTo(maxOf(position - 10000L, 0L))
                     }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Rewind 10s", tint = Color.White)
+                        Icon(Icons.Filled.Replay10, contentDescription = "Rewind 10s", tint = Color.White)
                     }
 
                     // Play / Pause Toggle
                     IconButton(onClick = {
                         if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
                     }) {
-                        val icon = if (state == PlaybackState.Playing) Icons.Default.Close else Icons.Default.PlayArrow
+                        val icon = if (state == PlaybackState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow
                         Icon(icon, contentDescription = "Play/Pause", tint = Color.White)
                     }
 
@@ -233,22 +235,19 @@ fun PlayerScreen(
                     IconButton(onClick = {
                         playbackEngine.seekTo(minOf(position + 10000L, duration))
                     }) {
-                        Icon(Icons.Default.Share, contentDescription = "Forward 10s", tint = Color.White) // fallback icon
+                        Icon(Icons.Filled.Forward10, contentDescription = "Forward 10s", tint = Color.White)
                     }
 
                     // Next Button
                     val hasNext = currentIndex < videoList.size - 1
                     IconButton(
                         onClick = {
-                            val nextItem = videoList[currentIndex + 1]
                             playbackEngine.stop()
-                            coroutineScope.launch {
-                                playbackEngine.open(android.net.Uri.parse(nextItem.contentUri))
-                            }
+                            onChangeVideo(currentIndex + 1)
                         },
                         enabled = hasNext
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Next", tint = if (hasNext) Color.White else Color.Gray)
+                        Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = if (hasNext) Color.White else Color.Gray)
                     }
 
                     // Speed selector

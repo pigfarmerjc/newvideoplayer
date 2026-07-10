@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
@@ -23,16 +25,64 @@ import com.pigfarmerjc.galleryplayer.core.model.MediaType
 fun VideoGridScreen(
     videos: List<LocalMediaItem>,
     onVideoClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    isLoading: Boolean,
+    loadError: String?
 ) {
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val screenWidth = configuration.screenWidthDp
+    val context = LocalContext.current
+    val hasPermission = PermissionState.hasVideoPermission(context)
 
-    // Dynamic grid column calculation
-    val columns = when {
-        screenWidth >= 600 -> if (isLandscape) 6 else 4
-        else -> if (isLandscape) 3 else 2
+    if (!hasPermission) {
+        InlinePermissionRequest(permissionType = "video", onGranted = onRefresh)
+        return
+    }
+
+    if (isLoading && videos.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CircularProgressIndicator()
+                Text("Loading local videos...", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        return
+    }
+
+    if (loadError != null && videos.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Text(
+                    text = "Failed to load videos",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = loadError,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Retry")
+                }
+            }
+        }
+        return
     }
 
     if (videos.isEmpty()) {
@@ -62,18 +112,32 @@ fun VideoGridScreen(
             }
         }
     } else {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            items(videos) { video ->
-                VideoCard(
-                    video = video,
-                    onClick = { onVideoClick(video, videos) }
-                )
+        val configuration = LocalConfiguration.current
+        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val screenWidth = configuration.screenWidthDp
+
+        val columns = when {
+            screenWidth >= 600 -> if (isLandscape) 6 else 4
+            else -> if (isLandscape) 3 else 2
+        }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (isLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize().weight(1f)
+            ) {
+                items(videos) { video ->
+                    VideoCard(
+                        video = video,
+                        onClick = { onVideoClick(video, videos) }
+                    )
+                }
             }
         }
     }
@@ -104,7 +168,6 @@ fun VideoCard(
                     modifier = Modifier.fillMaxSize()
                 )
                 
-                // Duration overlay
                 if (video.durationMs != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),

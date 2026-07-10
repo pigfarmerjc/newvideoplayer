@@ -18,7 +18,9 @@ fun HomeScreen(
     onImageClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit,
     onReload: () -> Unit,
     mediaRepositoryCount: Int,
-    playbackEngine: com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
+    playbackEngine: com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine,
+    isLoadingMedia: Boolean,
+    mediaLoadError: String?
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -36,7 +38,7 @@ fun HomeScreen(
                 NavigationBarItem(
                     selected = activeTab == HomeTab.FOLDERS,
                     onClick = { activeTab = HomeTab.FOLDERS },
-                    icon = { Icon(Icons.Default.List, contentDescription = "Folders") },
+                    icon = { Icon(Icons.Default.Menu, contentDescription = "Folders") },
                     label = { Text("Folders") }
                 )
                 NavigationBarItem(
@@ -64,21 +66,27 @@ fun HomeScreen(
                     VideoGridScreen(
                         videos = videos,
                         onVideoClick = onVideoClick,
-                        onRefresh = onReload
+                        onRefresh = onReload,
+                        isLoading = isLoadingMedia,
+                        loadError = mediaLoadError
                     )
                 }
                 HomeTab.FOLDERS -> {
                     FolderScreen(
                         folders = folders,
                         onFolderClick = onFolderClick,
-                        onRefresh = onReload
+                        onRefresh = onReload,
+                        isLoading = isLoadingMedia,
+                        loadError = mediaLoadError
                     )
                 }
                 HomeTab.IMAGES -> {
                     ImageGridScreen(
                         images = images,
                         onImageClick = onImageClick,
-                        onRefresh = onReload
+                        onRefresh = onReload,
+                        isLoading = isLoadingMedia,
+                        loadError = mediaLoadError
                     )
                 }
                 HomeTab.SETTINGS -> {

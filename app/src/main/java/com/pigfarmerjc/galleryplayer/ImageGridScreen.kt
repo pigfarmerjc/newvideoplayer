@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
@@ -23,15 +25,64 @@ import com.pigfarmerjc.galleryplayer.core.model.MediaType
 fun ImageGridScreen(
     images: List<LocalMediaItem>,
     onImageClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    isLoading: Boolean,
+    loadError: String?
 ) {
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val screenWidth = configuration.screenWidthDp
+    val context = LocalContext.current
+    val hasPermission = PermissionState.hasImagesPermission(context)
 
-    val columns = when {
-        screenWidth >= 600 -> if (isLandscape) 6 else 4
-        else -> if (isLandscape) 3 else 2
+    if (!hasPermission) {
+        InlinePermissionRequest(permissionType = "image", onGranted = onRefresh)
+        return
+    }
+
+    if (isLoading && images.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CircularProgressIndicator()
+                Text("Loading local images...", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        return
+    }
+
+    if (loadError != null && images.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Text(
+                    text = "Failed to load images",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = loadError,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Retry")
+                }
+            }
+        }
+        return
     }
 
     if (images.isEmpty()) {
@@ -61,18 +112,32 @@ fun ImageGridScreen(
             }
         }
     } else {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            items(images) { image ->
-                ImageCard(
-                    image = image,
-                    onClick = { onImageClick(image, images) }
-                )
+        val configuration = LocalConfiguration.current
+        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val screenWidth = configuration.screenWidthDp
+
+        val columns = when {
+            screenWidth >= 600 -> if (isLandscape) 6 else 4
+            else -> if (isLandscape) 3 else 2
+        }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (isLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                contentPadding = PaddingValues(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize().weight(1f)
+            ) {
+                items(images) { image ->
+                    ImageCard(
+                        image = image,
+                        onClick = { onImageClick(image, images) }
+                    )
+                }
             }
         }
     }
@@ -103,7 +168,6 @@ fun ImageCard(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // GIF Badge indicator overlay
                 if (image.isGif) {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,

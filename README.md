@@ -1,6 +1,9 @@
 # GalleryPlayer (新一代媒体播放器) 项目说明书与上手指南
 
-本项目是一个基于 **Android Jetpack Compose**、**Room 数据库** 以及 **LibVLC 3.7.4** 实现的高性能本地音视频播放器。旨在为 Android 设备（包含平板与手机）提供极致流畅、高度解耦、功能完备的音视频播放与多媒体库管理体验。
+> [!NOTE]
+> **Current direction: Product Reset MVP**
+> The app is now focused on becoming a usable local video player first.
+> Architecture experiments and advanced scanner work are secondary.
 
 ---
 

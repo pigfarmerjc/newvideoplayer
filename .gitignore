@@ -18,4 +18,5 @@ local.properties
 *.keystore
 test-media/*
 !test-media/README.md
-!test-media/TEST_MEDIA_MANIFEST.md
+
+.kotlin/

@@ -5,37 +5,62 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.LruCache
 import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.AccountBox // fallback placeholder
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+object ThumbnailCache {
+    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
+    private val cacheSize = maxMemory / 8 // Use 1/8th of available VM memory for bitmap caching
+
+    private val cache = object : LruCache<String, Bitmap>(cacheSize) {
+        override fun sizeOf(key: String, bitmap: Bitmap): Int {
+            return bitmap.byteCount / 1024
+        }
+    }
+
+    fun get(key: String): Bitmap? = cache.get(key)
+    
+    fun put(key: String, bitmap: Bitmap) {
+        cache.put(key, bitmap)
+    }
+}
+
 object ThumbnailLoader {
 
-    suspend fun loadMediaThumbnail(context: Context, contentUri: String, mediaType: MediaType): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun loadMediaThumbnail(
+        context: Context,
+        contentUri: String,
+        mediaType: MediaType,
+        width: Int = 320,
+        height: Int = 240
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val cacheKey = "${contentUri}_${width}_${height}"
+        val cached = ThumbnailCache.get(cacheKey)
+        if (cached != null) {
+            return@withContext cached
+        }
+
         return@withContext try {
             val uri = Uri.parse(contentUri)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                context.contentResolver.loadThumbnail(uri, Size(320, 240), null)
+            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                context.contentResolver.loadThumbnail(uri, Size(width, height), null)
             } else {
                 val id = uri.lastPathSegment?.toLongOrNull() ?: return@withContext null
                 if (mediaType == MediaType.VIDEO) {
@@ -54,6 +79,10 @@ object ThumbnailLoader {
                     )
                 }
             }
+            if (bitmap != null) {
+                ThumbnailCache.put(cacheKey, bitmap)
+            }
+            bitmap
         } catch (e: Exception) {
             null
         }
@@ -71,7 +100,6 @@ fun MediaThumbnail(
     var loaded by remember(contentUri) { mutableStateOf(false) }
 
     LaunchedEffect(contentUri) {
-        // Load thumbnail in background IO dispatcher
         val result = ThumbnailLoader.loadMediaThumbnail(
             context,
             contentUri,
@@ -94,7 +122,6 @@ fun MediaThumbnail(
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-            // Placeholder fallback
             val icon = if (mediaType == MediaType.VIDEO) {
                 Icons.Default.PlayCircle
             } else {
