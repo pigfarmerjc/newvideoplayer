@@ -398,20 +398,7 @@ fun PhotosCell(
             height = maxOf(targetSizePx, 60)
         )
 
-        // Duration badge — bottom right, very small
-        if (video.durationMs != null && video.durationMs > 0L) {
-            Text(
-                text = formatCellDuration(video.durationMs),
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = if (columnCount >= 9) 7.sp else if (columnCount >= 6) 9.sp else 10.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(2.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(2.dp))
-                    .padding(horizontal = 3.dp, vertical = 1.dp)
-            )
-        }
+
 
         // Progress bar at very bottom edge — 2dp
         if (progressRatio != null && progressRatio in 0.01f..0.99f) {

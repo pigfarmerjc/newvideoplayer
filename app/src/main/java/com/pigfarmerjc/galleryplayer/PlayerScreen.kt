@@ -144,6 +144,12 @@ fun PlayerScreen(
     val performDismiss = {
         coroutineScope.launch {
             saveProgressAndStop()
+            val dragAnim = Animatable(dragOffsetY)
+            launch {
+                dragAnim.animateTo(0f, androidx.compose.animation.core.tween(250)) {
+                    dragOffsetY = value
+                }
+            }
             transitionProgress.animateTo(0f, androidx.compose.animation.core.tween(250))
             onBack()
         }
@@ -388,16 +394,9 @@ fun PlayerScreen(
                     translationX = currentHorizontalOffset
                 }
         ) {
-            // 1. AndroidView Video Layout (fade in when playing)
-            val playerAlpha by androidx.compose.animation.core.animateFloatAsState(
-                targetValue = if (state == PlaybackState.Playing) 1f else 0f,
-                animationSpec = androidx.compose.animation.core.tween(300)
-            )
-
+            // 1. AndroidView Video Layout (always alpha = 1f to ensure SurfaceView is created)
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = playerAlpha }
+                modifier = Modifier.fillMaxSize()
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -426,11 +425,17 @@ fun PlayerScreen(
                 )
             }
 
-            // 2. Thumbnail Overlay (visible when loading or transitioning)
-            if (state != PlaybackState.Playing || playerAlpha < 1f) {
+            // 2. Thumbnail Overlay (fades out when video starts playing)
+            val thumbnailAlpha by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (state == PlaybackState.Playing) 0f else 1f,
+                animationSpec = androidx.compose.animation.core.tween(300)
+            )
+
+            if (thumbnailAlpha > 0f) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .graphicsLayer { alpha = thumbnailAlpha }
                         .background(Color.Black)
                 ) {
                     MediaThumbnail(
