@@ -56,8 +56,17 @@ fun PlayerScreen(
     // Prevent multiple initial seeks
     var hasAppliedInitialSeek by remember(videoUri) { mutableStateOf(false) }
 
+    // Protect playCount increment from pausing/resuming repeatedly
+    var hasStartedSession by remember(videoUri) { mutableStateOf(false) }
+
     // Intercept hardware back button
     BackHandler {
+        val currentPos = playbackEngine.positionMs.value
+        val dur = playbackEngine.durationMs.value
+        if (dur > 0) {
+            val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+            onPlaybackProgress(currentPos, dur, isFinished)
+        }
         playbackEngine.stop()
         onBack()
     }
@@ -89,7 +98,10 @@ fun PlayerScreen(
     // Periodically save progress every 5 seconds, and notify on play session start
     LaunchedEffect(videoUri, state) {
         if (state == PlaybackState.Playing) {
-            onPlaybackSessionStart()
+            if (!hasStartedSession) {
+                onPlaybackSessionStart()
+                hasStartedSession = true
+            }
             
             while (true) {
                 delay(5000)
@@ -121,6 +133,8 @@ fun PlayerScreen(
             }
         }
     }
+
+
 
     Box(
         modifier = Modifier
@@ -192,6 +206,12 @@ fun PlayerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
+                    val currentPos = playbackEngine.positionMs.value
+                    val dur = playbackEngine.durationMs.value
+                    if (dur > 0) {
+                        val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                        onPlaybackProgress(currentPos, dur, isFinished)
+                    }
                     playbackEngine.stop()
                     onBack()
                 }) {
@@ -258,6 +278,12 @@ fun PlayerScreen(
                     val hasPrev = currentIndex > 0
                     IconButton(
                         onClick = {
+                            val currentPos = playbackEngine.positionMs.value
+                            val dur = playbackEngine.durationMs.value
+                            if (dur > 0) {
+                                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                                onPlaybackProgress(currentPos, dur, isFinished)
+                            }
                             playbackEngine.stop()
                             onChangeVideo(currentIndex - 1)
                         },
@@ -292,6 +318,12 @@ fun PlayerScreen(
                     val hasNext = currentIndex < videoList.size - 1
                     IconButton(
                         onClick = {
+                            val currentPos = playbackEngine.positionMs.value
+                            val dur = playbackEngine.durationMs.value
+                            if (dur > 0) {
+                                val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                                onPlaybackProgress(currentPos, dur, isFinished)
+                            }
                             playbackEngine.stop()
                             onChangeVideo(currentIndex + 1)
                         },
