@@ -85,7 +85,9 @@ class VideoScaleFrameLayout(
 class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
     var onViewportChanged: ((containerWidth: Int, containerHeight: Int, vlcLayoutWidth: Int, vlcLayoutHeight: Int, isVideoSizeKnown: Boolean, lastViewportRect: String, scaleMode: VideoScaleMode) -> Unit)? = null
 
-    private var containerFrame: VideoScaleFrameLayout? = VideoScaleFrameLayout(context.applicationContext) { w, h, childW, childH, isKnown, rect, mode ->
+    // Use the passed context directly (must be Activity context, not applicationContext).
+    // VLCVideoLayout needs Activity context to access WindowManager for display metrics.
+    private var containerFrame: VideoScaleFrameLayout? = VideoScaleFrameLayout(context) { w, h, childW, childH, isKnown, rect, mode ->
         onViewportChanged?.invoke(w, h, childW, childH, isKnown, rect, mode)
     }
     private var isDisposed = false
@@ -132,6 +134,8 @@ class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
 
 class LibVlcVideoOutputHostFactory : VideoOutputHostFactory {
     override fun create(context: Context): VideoOutputHost {
-        return LibVlcVideoOutputHost(context.applicationContext)
+        // Do NOT use applicationContext here — pass the Activity context directly
+        // so VLCVideoLayout can access WindowManager and display metrics correctly.
+        return LibVlcVideoOutputHost(context)
     }
 }

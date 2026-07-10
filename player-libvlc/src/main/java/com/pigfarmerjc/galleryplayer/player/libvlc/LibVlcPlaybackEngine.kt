@@ -549,6 +549,11 @@ open class LibVlcPlaybackEngine protected constructor(
 
         val layout = vlcHost.vlcLayout ?: return
         mediaPlayer?.let { player ->
+            // keepAspectRatio=true: VLC maintains video aspect ratio (letterbox/pillarbox).
+            // This requires the View to have Activity context (fixed above) so that VLCVideoLayout
+            // can correctly read display metrics from WindowManager.
+            // Previously, using applicationContext caused VLC to read wrong container dimensions,
+            // producing a tiny video render area in the corner.
             player.attachViews(layout, null, true, false)
         }
     }

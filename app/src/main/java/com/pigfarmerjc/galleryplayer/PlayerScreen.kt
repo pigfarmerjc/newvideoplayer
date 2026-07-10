@@ -701,22 +701,41 @@ fun PlayerScreen(
                         Icon(icon, contentDescription = desc, tint = Color.White)
                     }
 
-                    // Video Scale Mode Toggle (Locked to Fit Experimental)
+                    // Video Scale Mode Toggle
                     var scaleExpanded by remember { mutableStateOf(false) }
                     Box {
+                        val scaleModeLabel = when (scaleMode) {
+                            VideoScaleMode.FIT -> stringResource(R.string.scale_fit)
+                            VideoScaleMode.FILL -> stringResource(R.string.scale_fill)
+                            VideoScaleMode.CENTER -> stringResource(R.string.scale_center)
+                        }
                         TextButton(onClick = { scaleExpanded = true }) {
                             Icon(Icons.Filled.AspectRatio, contentDescription = "Scale Mode", tint = Color.White, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.scale_fit) + " (实验)", color = Color.White)
+                            Text(scaleModeLabel, color = Color.White)
                         }
                         DropdownMenu(
                             expanded = scaleExpanded,
                             onDismissRequest = { scaleExpanded = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.scale_fit) + " (实验)") },
+                                text = { Text(stringResource(R.string.scale_fit)) },
                                 onClick = {
                                     onScaleModeChange(VideoScaleMode.FIT)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.scale_fill)) },
+                                onClick = {
+                                    onScaleModeChange(VideoScaleMode.FILL)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.scale_center)) },
+                                onClick = {
+                                    onScaleModeChange(VideoScaleMode.CENTER)
                                     scaleExpanded = false
                                 }
                             )
