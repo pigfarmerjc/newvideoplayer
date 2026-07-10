@@ -58,7 +58,9 @@ fun PlayerScreen(
     onPlaybackProgress: (positionMs: Long, durationMs: Long, completed: Boolean) -> Unit,
     onPlaybackSessionStart: () -> Unit,
     defaultSpeed: Float,
-    skipSeconds: Int
+    skipSeconds: Int,
+    repeatMode: PlaybackRepeatMode,
+    onRepeatModeChange: (PlaybackRepeatMode) -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -162,6 +164,31 @@ fun PlayerScreen(
         if (initialPositionMs > 0 && !hasAppliedInitialSeek && duration > 0 && isSeekable) {
             playbackEngine.seekTo(initialPositionMs)
             hasAppliedInitialSeek = true
+        }
+    }
+
+    // Handle playback ended state based on PlaybackRepeatMode
+    LaunchedEffect(state) {
+        if (state == PlaybackState.Ended) {
+            when (repeatMode) {
+                PlaybackRepeatMode.NONE -> {
+                    saveProgressAndStop()
+                }
+                PlaybackRepeatMode.ONE -> {
+                    // Repeat current video: seek to 0 and play again.
+                    // This does not change the videoUri, so hasStartedSession remains true
+                    // and duplicate playCount additions are blocked.
+                    playbackEngine.seekTo(0L)
+                    playbackEngine.play()
+                }
+                PlaybackRepeatMode.ALL -> {
+                    saveProgressAndStop()
+                    if (videoList.isNotEmpty()) {
+                        val nextIndex = (currentIndex + 1) % videoList.size
+                        onChangeVideo(nextIndex)
+                    }
+                }
+            }
         }
     }
 
@@ -489,6 +516,23 @@ fun PlayerScreen(
                             tint = if (hasNext) Color.White else Color.Gray,
                             modifier = Modifier.size(28.dp)
                         )
+                    }
+
+                    // Playback Repeat Mode Cycle Button
+                    IconButton(onClick = {
+                        val nextMode = when (repeatMode) {
+                            PlaybackRepeatMode.NONE -> PlaybackRepeatMode.ONE
+                            PlaybackRepeatMode.ONE -> PlaybackRepeatMode.ALL
+                            PlaybackRepeatMode.ALL -> PlaybackRepeatMode.NONE
+                        }
+                        onRepeatModeChange(nextMode)
+                    }) {
+                        val (icon, desc) = when (repeatMode) {
+                            PlaybackRepeatMode.NONE -> Icons.Filled.TrendingFlat to "Play Once"
+                            PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne to "Repeat One"
+                            PlaybackRepeatMode.ALL -> Icons.Filled.Repeat to "Repeat All"
+                        }
+                        Icon(icon, contentDescription = desc, tint = Color.White)
                     }
 
                     // Speed selector
