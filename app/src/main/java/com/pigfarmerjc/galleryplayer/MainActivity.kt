@@ -1,32 +1,30 @@
 package com.pigfarmerjc.galleryplayer
 
 import android.app.Application
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.pigfarmerjc.galleryplayer.core.player.api.*
+import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
+import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackState
+import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcPlaybackEngine
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
 import kotlinx.coroutines.launch
@@ -35,6 +33,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playbackEngine: PlaybackEngine = LibVlcPlaybackEngine(application)
     val videoOutputFactory: VideoOutputHostFactory = LibVlcVideoOutputHostFactory()
     var wasPlayingBeforeBackground: Boolean = false
+
+    // Media states
+    val videosList = mutableStateListOf<LocalMediaItem>()
+    val imagesList = mutableStateListOf<LocalMediaItem>()
+    val foldersList = mutableStateListOf<FolderItem>()
+    var permissionsGranted by mutableStateOf(false)
+    var mediaRepositoryCount by mutableStateOf(0)
+
+    fun refreshLocalMedia(context: android.content.Context) {
+        viewModelScope.launch {
+            if (!PermissionState.hasPermissions(context)) {
+                permissionsGranted = false
+                return@launch
+            }
+            permissionsGranted = true
+
+            val v = MediaStoreHelper.queryLocalVideos(context)
+            val img = MediaStoreHelper.queryLocalImages(context)
+
+            videosList.clear()
+            videosList.addAll(v)
+
+            imagesList.clear()
+            imagesList.addAll(img)
+
+            // Recompute folders aggregate
+            val f = v.groupBy { it.relativePath }.map { (path, items) ->
+                val folderName = path.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
+                FolderItem(
+                    volumeName = "external",
+                    relativePath = path,
+                    displayName = folderName,
+                    videoCount = items.size,
+                    coverUri = items.firstOrNull()?.contentUri,
+                    totalSize = items.sumOf { it.fileSize }
+                )
+            }
+            foldersList.clear()
+            foldersList.addAll(f)
+
+            mediaRepositoryCount = v.size + img.size
+        }
+    }
 
     override fun onCleared() {
         super.onCleared()
@@ -47,299 +88,151 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val viewModel: MainViewModel = viewModel()
+            val context = LocalContext.current
+
+            // Check permissions and load media on startup
+            LaunchedEffect(Unit) {
+                viewModel.refreshLocalMedia(context)
+            }
+
+            // Lifecycle Observer to handle application background/foreground states
+            val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_PAUSE) {
+                        viewModel.wasPlayingBeforeBackground = (viewModel.playbackEngine.playbackState.value == PlaybackState.Playing)
+                        viewModel.playbackEngine.pause()
+                    } else if (event == Lifecycle.Event.ON_RESUME) {
+                        if (viewModel.wasPlayingBeforeBackground) {
+                            viewModel.playbackEngine.play()
+                            viewModel.wasPlayingBeforeBackground = false
+                        }
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                }
+            }
+
             MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    PlayerAppScreen()
-                }
-            }
-        }
-    }
-
-    @Composable
-    fun PlayerAppScreen(viewModel: MainViewModel = viewModel()) {
-        val coroutineScope = rememberCoroutineScope()
-        val engine = viewModel.playbackEngine
-
-        // Collect engine states
-        val state by engine.playbackState.collectAsStateWithLifecycle()
-        val position by engine.positionMs.collectAsStateWithLifecycle()
-        val duration by engine.durationMs.collectAsStateWithLifecycle()
-        val isSeekable by engine.isSeekable.collectAsStateWithLifecycle()
-        val speed by engine.playbackSpeed.collectAsStateWithLifecycle()
-        val diagnostics by engine.diagnostics.collectAsStateWithLifecycle()
-
-        // Local UI states
-        var isDragging by remember { mutableStateOf(false) }
-        var dragPosition by remember { mutableStateOf(0f) }
-        var seekSuccessText by remember { mutableStateOf("") }
-
-        // Observe Lifecycle events to pause on background and restore properly
-        val lifecycleOwner = LocalLifecycleOwner.current
-        DisposableEffect(lifecycleOwner) {
-            val observer = LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_PAUSE) {
-                    viewModel.wasPlayingBeforeBackground = (engine.playbackState.value == PlaybackState.Playing)
-                    engine.pause()
-                } else if (event == Lifecycle.Event.ON_RESUME) {
-                    if (viewModel.wasPlayingBeforeBackground) {
-                        engine.play()
-                        viewModel.wasPlayingBeforeBackground = false
-                    }
-                }
-            }
-            lifecycleOwner.lifecycle.addObserver(observer)
-            onDispose {
-                lifecycleOwner.lifecycle.removeObserver(observer)
-            }
-        }
-
-        val filePicker = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.OpenDocument()
-        ) { uri: Uri? ->
-            if (uri != null) {
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (e: SecurityException) {
-                    Log.w("GalleryPlayer", "Persistable permission not supported for: $uri", e)
-                }
-                coroutineScope.launch {
-                    engine.open(uri)
-                }
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "GalleryPlayer Phase 0.5 Test Host",
-                style = MaterialTheme.typography.titleLarge
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Video Render Area
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp)
-                    .background(Color.Black),
-                contentAlignment = Alignment.Center
-            ) {
-                if (state == PlaybackState.Idle || state == PlaybackState.Released) {
-                    Text(text = "No Media Loaded", color = Color.White)
-                } else {
-                    var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
-                    AndroidView(
-                        factory = { ctx ->
-                            val host = viewModel.videoOutputFactory.create(ctx)
-                            videoHost = host
-                            engine.attachVideoOutput(host)
-                            // host.view is returned as a plain android.view.View
-                            host.view
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        onRelease = { view ->
-                            engine.detachVideoOutput()
-                            videoHost?.dispose()
-                            videoHost = null
+                    if (!viewModel.permissionsGranted) {
+                        PermissionScreen(context = context) {
+                            viewModel.refreshLocalMedia(context)
                         }
-                    )
-                }
-            }
+                    } else {
+                        // Custom stack-based navigation
+                        val screenStack = remember { mutableStateListOf<Screen>(Screen.Home) }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Progress Slider
-            val sliderValue = if (isDragging) dragPosition else position.toFloat()
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Slider(
-                    value = sliderValue,
-                    onValueChange = { newValue ->
-                        isDragging = true
-                        dragPosition = newValue
-                    },
-                    onValueChangeFinished = {
-                        isDragging = false
-                        engine.seekTo(dragPosition.toLong())
-                        seekSuccessText = "Seeked to ${dragPosition.toLong()} ms"
-                    },
-                    valueRange = 0f..maxOf(duration.toFloat(), 1f),
-                    enabled = isSeekable && duration > 0,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = formatTime(sliderValue.toLong()))
-                    Text(text = formatTime(duration))
-                }
-                if (seekSuccessText.isNotEmpty()) {
-                    Text(
-                        text = seekSuccessText,
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Controls
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(onClick = { filePicker.launch(arrayOf("video/*", "audio/*", "*/*")) }) {
-                    Text(text = "Select Document")
-                }
-
-                Button(
-                    onClick = {
-                        if (state == PlaybackState.Playing) engine.pause() else engine.play()
-                    },
-                    enabled = state == PlaybackState.Playing || state == PlaybackState.Paused
-                ) {
-                    Text(text = if (state == PlaybackState.Playing) "Pause" else "Play")
-                }
-
-                Button(
-                    onClick = { engine.stop() },
-                    enabled = state == PlaybackState.Playing || state == PlaybackState.Paused || state == PlaybackState.Buffering
-                ) {
-                    Text(text = "Stop")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Speed & Modes config
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Speed Selector
-                var speedExpanded by remember { mutableStateOf(false) }
-                Box {
-                    Button(onClick = { speedExpanded = true }) {
-                        Text(text = "Speed: ${speed}x")
-                    }
-                    DropdownMenu(
-                        expanded = speedExpanded,
-                        onDismissRequest = { speedExpanded = false }
-                    ) {
-                        listOf(0.25f, 0.5f, 1.0f, 1.5f, 2.0f, 4.0f).forEach { s ->
-                            DropdownMenuItem(
-                                text = { Text("${s}x") },
-                                onClick = {
-                                    engine.setSpeed(s)
-                                    speedExpanded = false
+                        when (val currentScreen = screenStack.lastOrNull()) {
+                            is Screen.Home -> {
+                                HomeScreen(
+                                    videos = viewModel.videosList,
+                                    images = viewModel.imagesList,
+                                    folders = viewModel.foldersList,
+                                    onVideoClick = { video, list ->
+                                        screenStack.add(
+                                            Screen.Player(
+                                                videoUri = video.contentUri,
+                                                videoTitle = video.displayName,
+                                                videoList = list,
+                                                currentIndex = list.indexOf(video)
+                                            )
+                                        )
+                                    },
+                                    onFolderClick = { folder ->
+                                        screenStack.add(
+                                            Screen.FolderVideos(
+                                                volumeName = folder.volumeName,
+                                                relativePath = folder.relativePath,
+                                                folderDisplayName = folder.displayName
+                                            )
+                                        )
+                                    },
+                                    onImageClick = { image, list ->
+                                        screenStack.add(
+                                            Screen.ImageViewer(
+                                                images = list,
+                                                initialIndex = list.indexOf(image)
+                                            )
+                                        )
+                                    },
+                                    onReload = { viewModel.refreshLocalMedia(context) },
+                                    mediaRepositoryCount = viewModel.mediaRepositoryCount,
+                                    playbackEngine = viewModel.playbackEngine
+                                )
+                            }
+                            is Screen.FolderVideos -> {
+                                val folderVideos = viewModel.videosList.filter { it.relativePath == currentScreen.relativePath }
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(56.dp)
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(onClick = { screenStack.removeAt(screenStack.lastIndex) }) {
+                                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = currentScreen.folderDisplayName,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        VideoGridScreen(
+                                            videos = folderVideos,
+                                            onVideoClick = { video, list ->
+                                                screenStack.add(
+                                                    Screen.Player(
+                                                        videoUri = video.contentUri,
+                                                        videoTitle = video.displayName,
+                                                        videoList = list,
+                                                        currentIndex = list.indexOf(video)
+                                                    )
+                                                )
+                                            },
+                                            onRefresh = { viewModel.refreshLocalMedia(context) }
+                                        )
+                                    }
                                 }
-                            )
-                        }
-                    }
-                }
-
-                // Decoder Mode Selector
-                var decoderExpanded by remember { mutableStateOf(false) }
-                Box {
-                    Button(onClick = { decoderExpanded = true }) {
-                        Text(text = "Decoder: ${diagnostics.decoderMode}")
-                    }
-                    DropdownMenu(
-                        expanded = decoderExpanded,
-                        onDismissRequest = { decoderExpanded = false }
-                    ) {
-                        DecoderMode.values().forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.name) },
-                                onClick = {
-                                    engine.setDecoderMode(mode)
-                                    decoderExpanded = false
+                                BackHandler {
+                                    screenStack.removeAt(screenStack.lastIndex)
                                 }
-                            )
-                        }
-                    }
-                }
-
-                // Repeat Mode Selector
-                var repeatMode by remember { mutableStateOf(RepeatMode.NONE) }
-                var repeatExpanded by remember { mutableStateOf(false) }
-                Box {
-                    Button(onClick = { repeatExpanded = true }) {
-                        Text(text = "Loop: ${repeatMode.name}")
-                    }
-                    DropdownMenu(
-                        expanded = repeatExpanded,
-                        onDismissRequest = { repeatExpanded = false }
-                    ) {
-                        listOf(RepeatMode.NONE, RepeatMode.ONE).forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.name) },
-                                onClick = {
-                                    repeatMode = mode
-                                    engine.setRepeatMode(mode)
-                                    repeatExpanded = false
-                                }
-                            )
+                            }
+                            is Screen.Player -> {
+                                PlayerScreen(
+                                    videoUri = currentScreen.videoUri,
+                                    videoTitle = currentScreen.videoTitle,
+                                    videoList = currentScreen.videoList,
+                                    currentIndex = currentScreen.currentIndex,
+                                    playbackEngine = viewModel.playbackEngine,
+                                    videoOutputFactory = viewModel.videoOutputFactory,
+                                    onBack = { screenStack.removeAt(screenStack.lastIndex) }
+                                )
+                            }
+                            is Screen.ImageViewer -> {
+                                ImageViewerScreen(
+                                    images = currentScreen.images,
+                                    initialIndex = currentScreen.initialIndex,
+                                    onBack = { screenStack.removeAt(screenStack.lastIndex) }
+                                )
+                            }
+                            null -> {
+                                screenStack.add(Screen.Home)
+                            }
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Diagnostics info
-            Text(
-                text = "Diagnostics Details",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(8.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(text = "URI: ${diagnostics.uri}")
-                Text(text = "MIME: ${diagnostics.mimeType}")
-                Text(text = "Duration: ${diagnostics.durationMs} ms")
-                Text(text = "Video Size: ${diagnostics.width} x ${diagnostics.height}")
-                Text(text = "Rotation: ${diagnostics.rotation}°")
-                Text(text = "Video Tracks: ${diagnostics.videoTracksCount}")
-                Text(text = "Audio Tracks: ${diagnostics.audioTracksCount}")
-                Text(text = "Sample Rate: ${diagnostics.sampleRate} Hz")
-                Text(text = "Channels: ${diagnostics.channels}")
-                Text(text = "Last Event: ${diagnostics.libvlcEvent}")
-                Text(text = "Last Error: ${diagnostics.lastError}")
-                Text(text = "Decoders: best-effort (check VLC logs)")
-            }
-        }
-    }
-
-    private fun formatTime(ms: Long): String {
-        val totalSecs = ms / 1000
-        val hours = totalSecs / 3600
-        val minutes = (totalSecs % 3600) / 60
-        val seconds = totalSecs % 60
-        return if (hours > 0) {
-            String.format("%02d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            String.format("%02d:%02d", minutes, seconds)
         }
     }
 }
