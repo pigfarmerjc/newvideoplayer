@@ -124,15 +124,44 @@ fun PhotosStyleVideoGridScreen(
         modifier = modifier
             .fillMaxSize()
             .pointerInput(columns) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    if (zoom != 1f) {
-                        zoomAccumulator *= zoom
-                        if (zoomAccumulator > 1.08f) {
-                            val newCols = PhotosGridState.applyZoomToColumns(columns, 1.10f)
-                            if (newCols != columns) { onColumnsChange(newCols); zoomAccumulator = 1f }
-                        } else if (zoomAccumulator < 0.92f) {
-                            val newCols = PhotosGridState.applyZoomToColumns(columns, 0.90f)
-                            if (newCols != columns) { onColumnsChange(newCols); zoomAccumulator = 1f }
+                awaitPointerEventScope {
+                    var lastDistance = 0f
+                    var isPinching = false
+                    while (true) {
+                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        val changes = event.changes
+                        val activeChanges = changes.filter { it.pressed }
+                        
+                        if (activeChanges.size >= 2) {
+                            val p1 = activeChanges[0].position
+                            val p2 = activeChanges[1].position
+                            val distance = kotlin.math.hypot(p1.x - p2.x, p1.y - p2.y)
+                            
+                            activeChanges.forEach { it.consume() }
+                            
+                            if (!isPinching) {
+                                lastDistance = distance
+                                isPinching = true
+                            } else {
+                                if (lastDistance > 0f) {
+                                    val ratio = distance / lastDistance
+                                    if (ratio > 1.15f) {
+                                        val newCols = (columns - 1).coerceIn(2, 12)
+                                        if (newCols != columns) {
+                                            onColumnsChange(newCols)
+                                            lastDistance = distance
+                                        }
+                                    } else if (ratio < 0.85f) {
+                                        val newCols = (columns + 1).coerceIn(2, 12)
+                                        if (newCols != columns) {
+                                            onColumnsChange(newCols)
+                                            lastDistance = distance
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            isPinching = false
                         }
                     }
                 }

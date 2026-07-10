@@ -184,16 +184,9 @@ fun PlayerScreen(
     LaunchedEffect(videoUri) {
         if (videoUri != lastVideoUri) {
             lastVideoUri = videoUri
-            if (isTransitioning) {
-                val startOffset = if (transitionDirection == 1) screenWidthPx else -screenWidthPx
-                swipeOffset.snapTo(startOffset)
-                swipeOffset.animateTo(0f, animationSpec = androidx.compose.animation.core.tween(durationMillis = 200))
-                isTransitioning = false
-            }
-        } else {
-            swipeOffset.snapTo(0f)
-            isTransitioning = false
         }
+        swipeOffset.snapTo(0f)
+        isTransitioning = false
     }
 
     // Full-screen immersive window setup
@@ -208,7 +201,6 @@ fun PlayerScreen(
         }
         onDispose {
             if (window != null) {
-                WindowCompat.setDecorFitsSystemWindows(window, true)
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
@@ -352,7 +344,7 @@ fun PlayerScreen(
 
     val finalScaleX = baseScaleX * dismissScale
     val finalScaleY = baseScaleY * dismissScale
-    val finalTransX = baseTransX + swipeOffset.value
+    val finalTransX = baseTransX
     val finalTransY = baseTransY + (if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) dragOffsetY else 0f)
 
     // Trigger open transition
@@ -360,6 +352,9 @@ fun PlayerScreen(
         transitionProgress.snapTo(0f)
         transitionProgress.animateTo(1f, androidx.compose.animation.core.tween(durationMillis = 300))
     }
+
+    val currentHorizontalOffset = swipeOffset.value + (if (dragDirection == DragDirection.Horizontal) dragOffsetX else 0f)
+    val widthPx = if (rootWidth > 0f) rootWidth else with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
 
     Box(
         modifier = Modifier
@@ -385,53 +380,102 @@ fun PlayerScreen(
             }
             .clip(RoundedCornerShape(dismissCornerDp.dp))
     ) {
-        // 1. AndroidView Video Layout (fade in when playing)
-        val playerAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (state == PlaybackState.Playing) 1f else 0f,
-            animationSpec = androidx.compose.animation.core.tween(300)
-        )
-
+        // ── Main Video Layer (slides horizontally) ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = playerAlpha }
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    val host = videoOutputFactory.create(ctx)
-                    videoHost = host
-                    playbackEngine.attachVideoOutput(host)
-                    host.setVideoScaleMode(scaleMode)
-                    host.view
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onGloballyPositioned { coordinates ->
-                        androidViewSize = coordinates.size
-                        playbackEngine.updateViewSizes(
-                            playerRootWidth = playerRootSize.width,
-                            playerRootHeight = playerRootSize.height,
-                            androidViewWidth = androidViewSize.width,
-                            androidViewHeight = androidViewSize.height
-                        )
-                    },
-                onRelease = {
-                    playbackEngine.detachVideoOutput()
-                    videoHost?.dispose()
-                    videoHost = null
+                .graphicsLayer {
+                    translationX = currentHorizontalOffset
                 }
+        ) {
+            // 1. AndroidView Video Layout (fade in when playing)
+            val playerAlpha by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (state == PlaybackState.Playing) 1f else 0f,
+                animationSpec = androidx.compose.animation.core.tween(300)
             )
-        }
 
-        // 2. Thumbnail Overlay (visible when loading or transitioning)
-        if (state != PlaybackState.Playing || playerAlpha < 1f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer { alpha = playerAlpha }
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        val host = videoOutputFactory.create(ctx)
+                        videoHost = host
+                        playbackEngine.attachVideoOutput(host)
+                        host.setVideoScaleMode(scaleMode)
+                        host.view
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            androidViewSize = coordinates.size
+                            playbackEngine.updateViewSizes(
+                                playerRootWidth = playerRootSize.width,
+                                playerRootHeight = playerRootSize.height,
+                                androidViewWidth = androidViewSize.width,
+                                androidViewHeight = androidViewSize.height
+                            )
+                        },
+                    onRelease = {
+                        playbackEngine.detachVideoOutput()
+                        videoHost?.dispose()
+                        videoHost = null
+                    }
+                )
+            }
+
+            // 2. Thumbnail Overlay (visible when loading or transitioning)
+            if (state != PlaybackState.Playing || playerAlpha < 1f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                ) {
+                    MediaThumbnail(
+                        contentUri = videoUri,
+                        mediaType = MediaType.VIDEO,
+                        modifier = Modifier.fillMaxSize(),
+                        width = 960,
+                        height = 540
+                    )
+                }
+            }
+        }
+
+        // 3. Next Video Thumbnail (Slides in from right)
+        if (currentIndex < videoList.size - 1 && currentHorizontalOffset < 0) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = currentHorizontalOffset + widthPx
+                    }
                     .background(Color.Black)
             ) {
                 MediaThumbnail(
-                    contentUri = videoUri,
+                    contentUri = videoList[currentIndex + 1].contentUri,
+                    mediaType = MediaType.VIDEO,
+                    modifier = Modifier.fillMaxSize(),
+                    width = 960,
+                    height = 540
+                )
+            }
+        }
+
+        // 4. Previous Video Thumbnail (Slides in from left)
+        if (currentIndex > 0 && currentHorizontalOffset > 0) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = currentHorizontalOffset - widthPx
+                    }
+                    .background(Color.Black)
+            ) {
+                MediaThumbnail(
+                    contentUri = videoList[currentIndex - 1].contentUri,
                     mediaType = MediaType.VIDEO,
                     modifier = Modifier.fillMaxSize(),
                     width = 960,
@@ -498,10 +542,10 @@ fun PlayerScreen(
 
                                 if (dragDirection == DragDirection.Undecided) {
                                     if (absX > lockThresholdPx || absY > lockThresholdPx) {
-                                        dragDirection = if (absX > absY) {
-                                            DragDirection.Horizontal
-                                        } else {
-                                            DragDirection.Vertical
+                                        if (absY > absX * 1.3f) {
+                                            dragDirection = DragDirection.Vertical
+                                        } else if (absX > absY * 1.3f) {
+                                            dragDirection = DragDirection.Horizontal
                                         }
                                     }
                                 }
@@ -526,13 +570,54 @@ fun PlayerScreen(
 
                                 when (action) {
                                     PlayerDragAction.Previous -> {
-                                        triggerVideoChange(currentIndex - 1)
+                                        if (currentIndex > 0) {
+                                            isTransitioning = true
+                                            coroutineScope.launch {
+                                                swipeOffset.snapTo(dragOffsetX)
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragDirection = DragDirection.Undecided
+                                                swipeOffset.animateTo(widthPx, androidx.compose.animation.core.tween(250))
+                                                saveProgressAndStop()
+                                                onChangeVideo(currentIndex - 1)
+                                            }
+                                        } else {
+                                            coroutineScope.launch {
+                                                swipeOffset.snapTo(dragOffsetX)
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragDirection = DragDirection.Undecided
+                                                swipeOffset.animateTo(0f, spring())
+                                            }
+                                        }
                                     }
                                     PlayerDragAction.Next -> {
-                                        triggerVideoChange(currentIndex + 1)
+                                        if (currentIndex < videoList.size - 1) {
+                                            isTransitioning = true
+                                            coroutineScope.launch {
+                                                swipeOffset.snapTo(dragOffsetX)
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragDirection = DragDirection.Undecided
+                                                swipeOffset.animateTo(-widthPx, androidx.compose.animation.core.tween(250))
+                                                saveProgressAndStop()
+                                                onChangeVideo(currentIndex + 1)
+                                            }
+                                        } else {
+                                            coroutineScope.launch {
+                                                swipeOffset.snapTo(dragOffsetX)
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragDirection = DragDirection.Undecided
+                                                swipeOffset.animateTo(0f, spring())
+                                            }
+                                        }
                                     }
                                     PlayerDragAction.Dismiss -> {
                                         performDismiss()
+                                        dragOffsetX = 0f
+                                        dragOffsetY = 0f
+                                        dragDirection = DragDirection.Undecided
                                     }
                                     PlayerDragAction.None -> {
                                         if (dragDirection == DragDirection.Vertical) {
@@ -541,26 +626,53 @@ fun PlayerScreen(
                                                 anim.animateTo(0f, animationSpec = spring()) {
                                                     dragOffsetY = value
                                                 }
+                                                dragOffsetX = 0f
+                                                dragDirection = DragDirection.Undecided
                                             }
+                                        } else if (dragDirection == DragDirection.Horizontal) {
+                                            coroutineScope.launch {
+                                                swipeOffset.snapTo(dragOffsetX)
+                                                dragOffsetX = 0f
+                                                dragOffsetY = 0f
+                                                dragDirection = DragDirection.Undecided
+                                                swipeOffset.animateTo(0f, spring())
+                                            }
+                                        } else {
+                                            dragOffsetX = 0f
+                                            dragOffsetY = 0f
+                                            dragDirection = DragDirection.Undecided
                                         }
                                     }
                                 }
+                            } else {
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
+                                dragDirection = DragDirection.Undecided
                             }
-
-                            dragOffsetX = 0f
-                            dragOffsetY = 0f
-                            dragDirection = DragDirection.Undecided
                         },
                         onDragCancel = {
-                            coroutineScope.launch {
-                                val anim = Animatable(dragOffsetY)
-                                anim.animateTo(0f) {
-                                    dragOffsetY = value
+                            if (dragDirection == DragDirection.Vertical) {
+                                coroutineScope.launch {
+                                    val anim = Animatable(dragOffsetY)
+                                    anim.animateTo(0f) {
+                                        dragOffsetY = value
+                                    }
+                                    dragOffsetX = 0f
+                                    dragDirection = DragDirection.Undecided
                                 }
+                            } else if (dragDirection == DragDirection.Horizontal) {
+                                coroutineScope.launch {
+                                    swipeOffset.snapTo(dragOffsetX)
+                                    dragOffsetX = 0f
+                                    dragOffsetY = 0f
+                                    dragDirection = DragDirection.Undecided
+                                    swipeOffset.animateTo(0f, spring())
+                                }
+                            } else {
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
+                                dragDirection = DragDirection.Undecided
                             }
-                            dragOffsetX = 0f
-                            dragOffsetY = 0f
-                            dragDirection = DragDirection.Undecided
                         }
                     )
                 }
