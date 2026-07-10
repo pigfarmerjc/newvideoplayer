@@ -7,10 +7,13 @@ import android.widget.FrameLayout
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHost
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import com.pigfarmerjc.galleryplayer.core.player.api.VideoScaleMode
+import com.pigfarmerjc.galleryplayer.core.player.api.VideoViewportCalculator
 import org.videolan.libvlc.util.VLCVideoLayout
-import kotlin.math.roundToInt
 
-class VideoScaleFrameLayout(context: Context) : FrameLayout(context) {
+class VideoScaleFrameLayout(
+    context: Context,
+    private val onViewportChanged: (width: Int, height: Int, isSizeKnown: Boolean, rectStr: String, mode: VideoScaleMode) -> Unit
+) : FrameLayout(context) {
     private var videoWidth = 0
     private var videoHeight = 0
     private var videoRotation = 0
@@ -44,68 +47,49 @@ class VideoScaleFrameLayout(context: Context) : FrameLayout(context) {
         val parentWidth = MeasureSpec.getSize(widthMeasureSpec)
         val parentHeight = MeasureSpec.getSize(heightMeasureSpec)
 
-        if (videoWidth <= 0 || videoHeight <= 0) {
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-            return
-        }
+        val rect = VideoViewportCalculator.calculate(
+            containerWidth = parentWidth,
+            containerHeight = parentHeight,
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
+            rotation = videoRotation,
+            mode = scaleMode
+        )
 
-        val rotatedWidth = if (videoRotation == 90 || videoRotation == 270) videoHeight else videoWidth
-        val rotatedHeight = if (videoRotation == 90 || videoRotation == 270) videoWidth else videoHeight
-
-        val videoAspectRatio = rotatedWidth.toFloat() / rotatedHeight.toFloat()
-        val containerAspectRatio = parentWidth.toFloat() / parentHeight.toFloat()
-
-        var childWidth = parentWidth
-        var childHeight = parentHeight
-
-        when (scaleMode) {
-            VideoScaleMode.FIT -> {
-                if (containerAspectRatio > videoAspectRatio) {
-                    childWidth = (parentHeight * videoAspectRatio).roundToInt()
-                    childHeight = parentHeight
-                } else {
-                    childWidth = parentWidth
-                    childHeight = (parentWidth / videoAspectRatio).roundToInt()
-                }
-            }
-            VideoScaleMode.FILL -> {
-                if (containerAspectRatio > videoAspectRatio) {
-                    childWidth = parentWidth
-                    childHeight = (parentWidth / videoAspectRatio).roundToInt()
-                } else {
-                    childWidth = (parentHeight * videoAspectRatio).roundToInt()
-                    childHeight = parentHeight
-                }
-            }
-            VideoScaleMode.CENTER -> {
-                childWidth = rotatedWidth
-                childHeight = rotatedHeight
-            }
-        }
-
-        val childWidthSpec = MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY)
-        val childHeightSpec = MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY)
+        val childWidthSpec = MeasureSpec.makeMeasureSpec(rect.width, MeasureSpec.EXACTLY)
+        val childHeightSpec = MeasureSpec.makeMeasureSpec(rect.height, MeasureSpec.EXACTLY)
         vlcVideoLayout.measure(childWidthSpec, childHeightSpec)
 
         setMeasuredDimension(parentWidth, parentHeight)
+        
+        onViewportChanged(parentWidth, parentHeight, videoWidth > 0 && videoHeight > 0, rect.toString(), scaleMode)
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val parentWidth = right - left
         val parentHeight = bottom - top
 
-        val childWidth = vlcVideoLayout.measuredWidth
-        val childHeight = vlcVideoLayout.measuredHeight
+        val rect = VideoViewportCalculator.calculate(
+            containerWidth = parentWidth,
+            containerHeight = parentHeight,
+            videoWidth = videoWidth,
+            videoHeight = videoHeight,
+            rotation = videoRotation,
+            mode = scaleMode
+        )
 
-        val childLeft = (parentWidth - childWidth) / 2
-        val childTop = (parentHeight - childHeight) / 2
-
-        vlcVideoLayout.layout(childLeft, childTop, childLeft + childWidth, childTop + childHeight)
+        vlcVideoLayout.layout(rect.left, rect.top, rect.right, rect.bottom)
+        
+        onViewportChanged(parentWidth, parentHeight, videoWidth > 0 && videoHeight > 0, rect.toString(), scaleMode)
     }
 }
 
 class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
-    private var containerFrame: VideoScaleFrameLayout? = VideoScaleFrameLayout(context.applicationContext)
+    var onViewportChanged: ((containerWidth: Int, containerHeight: Int, isVideoSizeKnown: Boolean, lastViewportRect: String, scaleMode: VideoScaleMode) -> Unit)? = null
+
+    private var containerFrame: VideoScaleFrameLayout? = VideoScaleFrameLayout(context.applicationContext) { w, h, isKnown, rect, mode ->
+        onViewportChanged?.invoke(w, h, isKnown, rect, mode)
+    }
     private var isDisposed = false
 
     override val view: View

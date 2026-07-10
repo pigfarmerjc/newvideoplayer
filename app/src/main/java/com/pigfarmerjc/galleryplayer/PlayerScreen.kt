@@ -26,8 +26,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -77,6 +77,8 @@ fun PlayerScreen(
     val duration by playbackEngine.durationMs.collectAsState()
     val isSeekable by playbackEngine.isSeekable.collectAsState()
     val speed by playbackEngine.playbackSpeed.collectAsState()
+    val diagnostics by playbackEngine.diagnostics.collectAsState()
+    val videoSizeState by playbackEngine.videoSize.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
     var isDragging by remember { mutableStateOf(false) }
@@ -112,6 +114,10 @@ fun PlayerScreen(
     var transitionDirection by remember { mutableStateOf(1) } // 1: Next (swiped left, new enters from right), -1: Prev (swiped right, new enters from left)
     var lastVideoUri by remember { mutableStateOf(videoUri) }
 
+    // Safe Transition loading and timeout variables
+    var isMediaLoading by remember(videoUri) { mutableStateOf(true) }
+    var isPlaybackTimeout by remember(videoUri) { mutableStateOf(false) }
+
     // Safe save helper
     val saveProgressAndStop = {
         val currentPos = playbackEngine.positionMs.value
@@ -128,12 +134,29 @@ fun PlayerScreen(
             val direction = if (newIndex > currentIndex) 1 else -1
             transitionDirection = direction
             isTransitioning = true
+            isMediaLoading = true
             coroutineScope.launch {
                 val targetOffset = if (direction == 1) -screenWidthPx else screenWidthPx
                 swipeOffset.animateTo(targetOffset, animationSpec = androidx.compose.animation.core.tween(durationMillis = 200))
                 saveProgressAndStop()
                 onChangeVideo(newIndex)
             }
+        }
+    }
+
+    // Hide transition loader when playing starts or size details are available
+    LaunchedEffect(state, videoSizeState) {
+        if (state == PlaybackState.Playing || (videoSizeState != null && videoSizeState!!.width > 0)) {
+            isMediaLoading = false
+        }
+    }
+
+    // Monitor timeout state (e.g. 7 seconds without video track size or playback starting)
+    LaunchedEffect(videoUri) {
+        isPlaybackTimeout = false
+        delay(7000)
+        if (isMediaLoading && state != PlaybackState.Playing) {
+            isPlaybackTimeout = true
         }
     }
 
@@ -148,7 +171,6 @@ fun PlayerScreen(
                 isTransitioning = false
             }
         } else {
-            // Just in case, reset offset if URI didn't change but transition finished
             swipeOffset.snapTo(0f)
             isTransitioning = false
         }
@@ -179,7 +201,7 @@ fun PlayerScreen(
         onBack()
     }
 
-    // Auto-hide controls after 3 seconds of inactivity (paused when dragging or speed dialog open)
+    // Auto-hide controls after 3 seconds of inactivity
     LaunchedEffect(controlsVisible, isDragging, state) {
         if (controlsVisible && !isDragging && state == PlaybackState.Playing) {
             delay(3000)
@@ -191,6 +213,7 @@ fun PlayerScreen(
     LaunchedEffect(videoUri, videoHost) {
         val host = videoHost
         if (host != null) {
+            isMediaLoading = true
             playbackEngine.open(android.net.Uri.parse(videoUri))
         }
     }
@@ -312,35 +335,41 @@ fun PlayerScreen(
                 .pointerInput(speed, skipSeconds, currentSpeed) {
                     detectTapGestures(
                         onTap = {
-                            controlsVisible = !controlsVisible
+                            if (!isMediaLoading) {
+                                controlsVisible = !controlsVisible
+                            }
                         },
                         onDoubleTap = { offset ->
-                            val currentPos = playbackEngine.positionMs.value
-                            val dur = playbackEngine.durationMs.value
-                            val isLeft = offset.x < size.width / 2
-                            val skipOffset = skipSeconds * 1000L
-                            if (isLeft) {
-                                playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
-                            } else {
-                                playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
+                            if (!isMediaLoading) {
+                                val currentPos = playbackEngine.positionMs.value
+                                val dur = playbackEngine.durationMs.value
+                                val isLeft = offset.x < size.width / 2
+                                val skipOffset = skipSeconds * 1000L
+                                if (isLeft) {
+                                    playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
+                                } else {
+                                    playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
+                                }
                             }
                         },
                         onPress = {
-                            var isLongPress = false
-                            val job = coroutineScope.launch {
-                                delay(500)
-                                isLongPress = true
-                                playbackEngine.setSpeed(2.0f)
-                            }
-                            tryAwaitRelease()
-                            job.cancel()
-                            if (isLongPress) {
-                                playbackEngine.setSpeed(currentSpeed)
+                            if (!isMediaLoading) {
+                                var isLongPress = false
+                                val job = coroutineScope.launch {
+                                    delay(500)
+                                    isLongPress = true
+                                    playbackEngine.setSpeed(2.0f)
+                                }
+                                tryAwaitRelease()
+                                job.cancel()
+                                if (isLongPress) {
+                                    playbackEngine.setSpeed(currentSpeed)
+                                }
                             }
                         }
                     )
                 }
-                .pointerInput(currentIndex, videoList.size, isTransitioning) {
+                .pointerInput(currentIndex, videoList.size, isTransitioning, isMediaLoading) {
                     detectDragGestures(
                         onDragStart = {
                             dragOffsetX = 0f
@@ -348,55 +377,59 @@ fun PlayerScreen(
                             dragDirection = DragDirection.Undecided
                         },
                         onDrag = { change, dragAmount ->
-                            dragOffsetX += dragAmount.x
-                            dragOffsetY += dragAmount.y
+                            if (!isMediaLoading) {
+                                dragOffsetX += dragAmount.x
+                                dragOffsetY += dragAmount.y
 
-                            val absX = abs(dragOffsetX)
-                            val absY = abs(dragOffsetY)
+                                val absX = abs(dragOffsetX)
+                                val absY = abs(dragOffsetY)
 
-                            if (dragDirection == DragDirection.Undecided) {
-                                if (absX > lockThresholdPx || absY > lockThresholdPx) {
-                                    dragDirection = if (absX > absY) {
-                                        DragDirection.Horizontal
-                                    } else {
-                                        DragDirection.Vertical
+                                if (dragDirection == DragDirection.Undecided) {
+                                    if (absX > lockThresholdPx || absY > lockThresholdPx) {
+                                        dragDirection = if (absX > absY) {
+                                            DragDirection.Horizontal
+                                        } else {
+                                            DragDirection.Vertical
+                                        }
                                     }
                                 }
-                            }
 
-                            if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
-                                change.consume()
-                            } else if (dragDirection == DragDirection.Horizontal) {
-                                change.consume()
+                                if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
+                                    change.consume()
+                                } else if (dragDirection == DragDirection.Horizontal) {
+                                    change.consume()
+                                }
                             }
                         },
                         onDragEnd = {
-                            val action = PlayerGestureState.determineAction(
-                                dragOffsetX = dragOffsetX,
-                                dragOffsetY = dragOffsetY,
-                                horizontalThresholdPx = horizontalThresholdPx,
-                                verticalThresholdPx = verticalThresholdPx,
-                                currentIndex = currentIndex,
-                                lastIndex = videoList.size - 1
-                            )
+                            if (!isMediaLoading) {
+                                val action = PlayerGestureState.determineAction(
+                                    dragOffsetX = dragOffsetX,
+                                    dragOffsetY = dragOffsetY,
+                                    horizontalThresholdPx = horizontalThresholdPx,
+                                    verticalThresholdPx = verticalThresholdPx,
+                                    currentIndex = currentIndex,
+                                    lastIndex = videoList.size - 1
+                                )
 
-                            when (action) {
-                                PlayerDragAction.Previous -> {
-                                    triggerVideoChange(currentIndex - 1)
-                                }
-                                PlayerDragAction.Next -> {
-                                    triggerVideoChange(currentIndex + 1)
-                                }
-                                PlayerDragAction.Dismiss -> {
-                                    saveProgressAndStop()
-                                    onBack()
-                                }
-                                PlayerDragAction.None -> {
-                                    if (dragDirection == DragDirection.Vertical) {
-                                        coroutineScope.launch {
-                                            val anim = Animatable(dragOffsetY)
-                                            anim.animateTo(0f, animationSpec = spring()) {
-                                                dragOffsetY = value
+                                when (action) {
+                                    PlayerDragAction.Previous -> {
+                                        triggerVideoChange(currentIndex - 1)
+                                    }
+                                    PlayerDragAction.Next -> {
+                                        triggerVideoChange(currentIndex + 1)
+                                    }
+                                    PlayerDragAction.Dismiss -> {
+                                        saveProgressAndStop()
+                                        onBack()
+                                    }
+                                    PlayerDragAction.None -> {
+                                        if (dragDirection == DragDirection.Vertical) {
+                                            coroutineScope.launch {
+                                                val anim = Animatable(dragOffsetY)
+                                                anim.animateTo(0f, animationSpec = spring()) {
+                                                    dragOffsetY = value
+                                                }
                                             }
                                         }
                                     }
@@ -423,7 +456,7 @@ fun PlayerScreen(
         )
 
         // Top and Bottom Controls Overlays
-        if (controlsVisible) {
+        if (controlsVisible && !isMediaLoading) {
             val folderName = remember(videoUri) {
                 val activeVideoItem = videoList.getOrNull(currentIndex)
                 activeVideoItem?.relativePath?.trimEnd('/')?.split('/')?.lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
@@ -680,9 +713,114 @@ fun PlayerScreen(
             }
         }
 
-        // Failure state overlay
+        // Loading Transition Overlay (Spinner + Title)
+        if (isMediaLoading && state != PlaybackState.Error && !isPlaybackTimeout) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(color = Color.White)
+                    Text(
+                        text = videoTitle,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+                }
+            }
+        }
+
+        // Playback Timeout Warning Overlay
+        if (isPlaybackTimeout && isMediaLoading && state != PlaybackState.Error) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Warning,
+                            contentDescription = "Warning",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = "视频画面未正常显示",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            text = "可尝试切换解码模式或显示模式\n请复制诊断信息反馈",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val annotatedString = android.text.TextUtils.concat(
+                                        "Device: ${android.os.Build.BRAND} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})\n",
+                                        "App Version: 1.0 (Debug Build)\n",
+                                        "Media Stats: ${videoList.size} videos\n",
+                                        "Decoder Mode: ${diagnostics.decoderMode}\n",
+                                        "Last Playback Title: $videoTitle\n",
+                                        "Last Playback URI: $videoUri\n",
+                                        "Playback Error: ${diagnostics.lastError}\n",
+                                        "Playback State: ${playbackEngine.playbackState.value}\n",
+                                        "Track Resolution: ${diagnostics.width}x${diagnostics.height} (Rot: ${diagnostics.rotation})\n",
+                                        "Viewport Container: ${diagnostics.containerWidth}x${diagnostics.containerHeight}\n",
+                                        "Surface Attached: ${diagnostics.surfaceAttached}\n",
+                                        "Last Viewport Rect: ${diagnostics.lastViewportRect}\n",
+                                        "Scale Mode: ${diagnostics.scaleMode}\n",
+                                        "Video Size Known: ${diagnostics.isVideoSizeKnown}\n",
+                                        "Attach / Open Timestamps: ${diagnostics.lastVideoOutputAttachTime} / ${diagnostics.lastMediaOpenTime}\n",
+                                        "Audio: ${diagnostics.sampleRate}Hz / ${diagnostics.channels}ch\n"
+                                    ).toString()
+                                    
+                                    val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("Diagnostics", annotatedString))
+                                    android.widget.Toast.makeText(context, "Diagnostics copied to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text(stringResource(R.string.copy_diagnostics))
+                            }
+                            TextButton(
+                                onClick = {
+                                    saveProgressAndStop()
+                                    onBack()
+                                }
+                            ) {
+                                Text(stringResource(R.string.close), color = MaterialTheme.colorScheme.onErrorContainer)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Playback Error Overlay
         if (state == PlaybackState.Error) {
-            val diagnosticsValue by playbackEngine.diagnostics.collectAsState()
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -725,13 +863,19 @@ fun PlayerScreen(
                                         "Device: ${android.os.Build.BRAND} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})\n",
                                         "App Version: 1.0 (Debug Build)\n",
                                         "Media Stats: ${videoList.size} videos\n",
-                                        "Decoder Mode: ${diagnosticsValue.decoderMode}\n",
+                                        "Decoder Mode: ${diagnostics.decoderMode}\n",
                                         "Last Playback Title: $videoTitle\n",
                                         "Last Playback URI: $videoUri\n",
-                                        "Playback Error: ${diagnosticsValue.lastError}\n",
+                                        "Playback Error: ${diagnostics.lastError}\n",
                                         "Playback State: ${playbackEngine.playbackState.value}\n",
-                                        "Track Resolution: ${diagnosticsValue.width}x${diagnosticsValue.height}\n",
-                                        "Audio: ${diagnosticsValue.sampleRate}Hz / ${diagnosticsValue.channels}ch\n"
+                                        "Track Resolution: ${diagnostics.width}x${diagnostics.height} (Rot: ${diagnostics.rotation})\n",
+                                        "Viewport Container: ${diagnostics.containerWidth}x${diagnostics.containerHeight}\n",
+                                        "Surface Attached: ${diagnostics.surfaceAttached}\n",
+                                        "Last Viewport Rect: ${diagnostics.lastViewportRect}\n",
+                                        "Scale Mode: ${diagnostics.scaleMode}\n",
+                                        "Video Size Known: ${diagnostics.isVideoSizeKnown}\n",
+                                        "Attach / Open Timestamps: ${diagnostics.lastVideoOutputAttachTime} / ${diagnostics.lastMediaOpenTime}\n",
+                                        "Audio: ${diagnostics.sampleRate}Hz / ${diagnostics.channels}ch\n"
                                     ).toString()
                                     
                                     val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

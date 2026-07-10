@@ -300,7 +300,15 @@ open class LibVlcPlaybackEngine protected constructor(
         channels: Int? = null,
         libvlcEvent: String? = null,
         lastError: String? = null,
-        playbackStrategy: String? = null
+        playbackStrategy: String? = null,
+        containerWidth: Int? = null,
+        containerHeight: Int? = null,
+        surfaceAttached: Boolean? = null,
+        lastVideoOutputAttachTime: Long? = null,
+        lastMediaOpenTime: Long? = null,
+        scaleMode: VideoScaleMode? = null,
+        isVideoSizeKnown: Boolean? = null,
+        lastViewportRect: String? = null
     ) {
         val currentDiag = _diagnostics.value
         _diagnostics.value = currentDiag.copy(
@@ -317,7 +325,15 @@ open class LibVlcPlaybackEngine protected constructor(
             decoderMode = currentDecoderMode,
             libvlcEvent = libvlcEvent ?: currentDiag.libvlcEvent,
             lastError = lastError ?: currentDiag.lastError,
-            playbackStrategy = playbackStrategy ?: currentDiag.playbackStrategy
+            playbackStrategy = playbackStrategy ?: currentDiag.playbackStrategy,
+            containerWidth = containerWidth ?: currentDiag.containerWidth,
+            containerHeight = containerHeight ?: currentDiag.containerHeight,
+            surfaceAttached = surfaceAttached ?: currentDiag.surfaceAttached,
+            lastVideoOutputAttachTime = lastVideoOutputAttachTime ?: currentDiag.lastVideoOutputAttachTime,
+            lastMediaOpenTime = lastMediaOpenTime ?: currentDiag.lastMediaOpenTime,
+            scaleMode = scaleMode ?: currentDiag.scaleMode,
+            isVideoSizeKnown = isVideoSizeKnown ?: currentDiag.isVideoSizeKnown,
+            lastViewportRect = lastViewportRect ?: currentDiag.lastViewportRect
         )
     }
 
@@ -345,6 +361,7 @@ open class LibVlcPlaybackEngine protected constructor(
         _durationMs.value = 0L
         _videoSize.value = null
         hasRetriedForCurrentUri = false
+        updateDiagnostics(lastMediaOpenTime = System.currentTimeMillis())
         tryToLoadMedia(uri, SourceStrategy.DIRECT_URI)
     }
 
@@ -471,6 +488,23 @@ open class LibVlcPlaybackEngine protected constructor(
         }
     }
 
+    override fun updateViewportDiagnostics(
+        containerWidth: Int,
+        containerHeight: Int,
+        isVideoSizeKnown: Boolean,
+        lastViewportRect: String,
+        scaleMode: VideoScaleMode
+    ) {
+        val currentDiag = _diagnostics.value
+        _diagnostics.value = currentDiag.copy(
+            containerWidth = containerWidth,
+            containerHeight = containerHeight,
+            isVideoSizeKnown = isVideoSizeKnown,
+            lastViewportRect = lastViewportRect,
+            scaleMode = scaleMode
+        )
+    }
+
     override fun attachVideoOutput(output: VideoOutputHost) {
         if (activeVideoOutput != null && activeVideoOutput != output) {
             detachVideoOutput()
@@ -481,7 +515,17 @@ open class LibVlcPlaybackEngine protected constructor(
         if (size != null) {
             output.setVideoSize(size.width, size.height, rot)
         }
+        
+        updateDiagnostics(
+            surfaceAttached = true,
+            lastVideoOutputAttachTime = System.currentTimeMillis()
+        )
+
         val vlcHost = output as? LibVlcVideoOutputHost ?: return
+        vlcHost.onViewportChanged = { containerWidth, containerHeight, isVideoSizeKnown, lastViewportRect, scaleMode ->
+            updateViewportDiagnostics(containerWidth, containerHeight, isVideoSizeKnown, lastViewportRect, scaleMode)
+        }
+
         val layout = vlcHost.vlcLayout ?: return
         mediaPlayer?.let { player ->
             player.attachViews(layout, null, true, false)
@@ -489,8 +533,11 @@ open class LibVlcPlaybackEngine protected constructor(
     }
 
     override fun detachVideoOutput() {
+        val vlcHost = activeVideoOutput as? LibVlcVideoOutputHost
+        vlcHost?.onViewportChanged = null
         mediaPlayer?.detachViews()
         activeVideoOutput = null
+        updateDiagnostics(surfaceAttached = false)
     }
 
     override fun release() {

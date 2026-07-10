@@ -25,6 +25,13 @@ interface PlaybackEngine {
     fun attachVideoOutput(output: VideoOutputHost)
     fun detachVideoOutput()
     fun release()
+    fun updateViewportDiagnostics(
+        containerWidth: Int,
+        containerHeight: Int,
+        isVideoSizeKnown: Boolean,
+        lastViewportRect: String,
+        scaleMode: VideoScaleMode
+    ) {}
 }
 
 interface VideoOutputHost {
@@ -81,5 +88,13 @@ data class PlaybackDiagnostics(
     val decoderMode: DecoderMode = DecoderMode.AUTO,
     val libvlcEvent: String = "",
     val lastError: String = "",
-    val playbackStrategy: String = "DIRECT_URI"
+    val playbackStrategy: String = "DIRECT_URI",
+    val containerWidth: Int = 0,
+    val containerHeight: Int = 0,
+    val surfaceAttached: Boolean = false,
+    val lastVideoOutputAttachTime: Long = 0L,
+    val lastMediaOpenTime: Long = 0L,
+    val scaleMode: VideoScaleMode = VideoScaleMode.FIT,
+    val isVideoSizeKnown: Boolean = false,
+    val lastViewportRect: String = ""
 )
