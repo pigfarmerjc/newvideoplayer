@@ -46,7 +46,11 @@ fun HomeScreen(
     onAddSafFolder: (String) -> Unit,
     onRemoveSafFolder: (String) -> Unit,
     themeMode: AppThemeMode,
-    onThemeModeChange: (AppThemeMode) -> Unit
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    videoViewMode: VideoViewMode,
+    onVideoViewModeChange: (VideoViewMode) -> Unit,
+    photosGridColumns: Int,
+    onPhotosGridColumnsChange: (Int) -> Unit
 ) {
     var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
 
@@ -100,7 +104,11 @@ fun HomeScreen(
                         onSearchQueryChange = onSearchQueryChange,
                         sortMode = videoSortMode,
                         onSortModeChange = onVideoSortModeChange,
-                        continueWatchingVideos = continueWatchingVideos
+                        continueWatchingVideos = continueWatchingVideos,
+                        videoViewMode = videoViewMode,
+                        onVideoViewModeChange = onVideoViewModeChange,
+                        photosGridColumns = photosGridColumns,
+                        onPhotosGridColumnsChange = onPhotosGridColumnsChange
                     )
                 }
                 HomeTab.FOLDERS -> {
@@ -147,7 +155,11 @@ fun HomeScreen(
                         imagesCount = images.size,
                         foldersCount = folders.size,
                         themeMode = themeMode,
-                        onThemeModeChange = onThemeModeChange
+                        onThemeModeChange = onThemeModeChange,
+                        videoViewMode = videoViewMode,
+                        onVideoViewModeChange = onVideoViewModeChange,
+                        photosGridColumns = photosGridColumns,
+                        onPhotosGridColumnsChange = onPhotosGridColumnsChange
                     )
                 }
             }

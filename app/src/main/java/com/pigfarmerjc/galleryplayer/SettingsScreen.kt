@@ -15,6 +15,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -39,7 +40,11 @@ fun SettingsScreen(
     imagesCount: Int,
     foldersCount: Int,
     themeMode: AppThemeMode,
-    onThemeModeChange: (AppThemeMode) -> Unit
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    videoViewMode: VideoViewMode,
+    onVideoViewModeChange: (VideoViewMode) -> Unit,
+    photosGridColumns: Int,
+    onPhotosGridColumnsChange: (Int) -> Unit
 ) {
     var showDebugDialog by remember { mutableStateOf(false) }
     val diagnostics by playbackEngine.diagnostics.collectAsState()
@@ -131,6 +136,94 @@ fun SettingsScreen(
                     }
                 }
             )
+        }
+
+        // Video View Settings Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                // View Mode setting
+                var viewModeExpanded by remember { mutableStateOf(false) }
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.default_video_view_mode)) },
+                    supportingContent = {
+                        val label = when (videoViewMode) {
+                            VideoViewMode.CARD -> stringResource(R.string.card_view)
+                            VideoViewMode.PHOTOS_GRID -> stringResource(R.string.photos_grid)
+                        }
+                        Text(label)
+                    },
+                    trailingContent = {
+                        Box {
+                            TextButton(onClick = { viewModeExpanded = true }) {
+                                val label = when (videoViewMode) {
+                                    VideoViewMode.CARD -> stringResource(R.string.card_view)
+                                    VideoViewMode.PHOTOS_GRID -> stringResource(R.string.photos_grid)
+                                }
+                                Text(label)
+                            }
+                            DropdownMenu(
+                                expanded = viewModeExpanded,
+                                onDismissRequest = { viewModeExpanded = false }
+                            ) {
+                                VideoViewMode.values().forEach { mode ->
+                                    val label = when (mode) {
+                                        VideoViewMode.CARD -> stringResource(R.string.card_view)
+                                        VideoViewMode.PHOTOS_GRID -> stringResource(R.string.photos_grid)
+                                    }
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                        onClick = {
+                                            onVideoViewModeChange(mode)
+                                            viewModeExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                // Photos Grid Columns slider setting
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.photos_grid_columns_setting),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "$photosGridColumns",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.photos_grid_columns_setting_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = photosGridColumns.toFloat(),
+                        onValueChange = { onPhotosGridColumnsChange(it.roundToInt()) },
+                        valueRange = 2f..12f,
+                        steps = 9,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
 
         // Playback Decoder Mode

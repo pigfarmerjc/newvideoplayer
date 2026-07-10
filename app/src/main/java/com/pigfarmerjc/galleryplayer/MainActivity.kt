@@ -89,6 +89,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var repeatModeState by mutableStateOf(PlaybackRepeatMode.NONE)
     var themeModeState by mutableStateOf(AppThemeMode.SYSTEM)
     var scaleModeState by mutableStateOf(VideoScaleMode.FIT)
+    var videoViewModeState by mutableStateOf(VideoViewMode.CARD)
+    var photosGridColumnsState by mutableStateOf(6)
 
     val historyListState = mutableStateOf<List<com.pigfarmerjc.galleryplayer.core.database.repository.PlaybackHistoryItem>>(emptyList())
 
@@ -124,6 +126,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val scaleModeVal = playbackPrefs.getString("scale_mode", VideoScaleMode.FIT.name) ?: VideoScaleMode.FIT.name
         scaleModeState = VideoScaleMode.values().firstOrNull { it.name == scaleModeVal } ?: VideoScaleMode.FIT
+
+        val viewPrefs = application.getSharedPreferences("video_view_settings", android.content.Context.MODE_PRIVATE)
+        val modeStr = viewPrefs.getString("video_view_mode", VideoViewMode.CARD.name) ?: VideoViewMode.CARD.name
+        videoViewModeState = VideoViewMode.values().firstOrNull { it.name == modeStr } ?: VideoViewMode.CARD
+        photosGridColumnsState = viewPrefs.getInt("photos_grid_columns", 6)
 
         // Stream playback history changes to the progress map
         viewModelScope.launch {
@@ -222,6 +229,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scaleModeState = mode
         getApplication<Application>().getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
             .edit().putString("scale_mode", mode.name).apply()
+    }
+
+    fun updateVideoViewMode(mode: VideoViewMode) {
+        videoViewModeState = mode
+        getApplication<Application>().getSharedPreferences("video_view_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putString("video_view_mode", mode.name).apply()
+    }
+
+    fun updatePhotosGridColumns(columns: Int) {
+        photosGridColumnsState = columns.coerceIn(2, 12)
+        getApplication<Application>().getSharedPreferences("video_view_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putInt("photos_grid_columns", columns.coerceIn(2, 12)).apply()
     }
 
     fun startPlaybackSession(video: LocalMediaItem) {
@@ -476,7 +495,11 @@ class MainActivity : ComponentActivity() {
                                     onAddSafFolder = { viewModel.addSafFolder(it, context) },
                                     onRemoveSafFolder = { viewModel.removeSafFolder(it, context) },
                                     themeMode = viewModel.themeModeState,
-                                    onThemeModeChange = { viewModel.updateThemeMode(it) }
+                                    onThemeModeChange = { viewModel.updateThemeMode(it) },
+                                    videoViewMode = viewModel.videoViewModeState,
+                                    onVideoViewModeChange = { viewModel.updateVideoViewMode(it) },
+                                    photosGridColumns = viewModel.photosGridColumnsState,
+                                    onPhotosGridColumnsChange = { viewModel.updatePhotosGridColumns(it) }
                                 )
                             }
                             is Screen.FolderVideos -> {
@@ -527,7 +550,11 @@ class MainActivity : ComponentActivity() {
                                             onSearchQueryChange = { viewModel.searchQuery = it },
                                             sortMode = viewModel.videoSortMode,
                                             onSortModeChange = { viewModel.updateVideoSortMode(it) },
-                                            continueWatchingVideos = emptyList()
+                                            continueWatchingVideos = emptyList(),
+                                            videoViewMode = viewModel.videoViewModeState,
+                                            onVideoViewModeChange = { viewModel.updateVideoViewMode(it) },
+                                            photosGridColumns = viewModel.photosGridColumnsState,
+                                            onPhotosGridColumnsChange = { viewModel.updatePhotosGridColumns(it) }
                                         )
                                     }
                                 }

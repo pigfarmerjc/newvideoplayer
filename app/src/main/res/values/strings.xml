@@ -87,4 +87,9 @@
     <string name="media_library_refreshed">Media library refreshed</string>
     <string name="media_library_refresh_failed">Refresh failed: %1$s</string>
     <string name="playback_resumed">Resumed from last position</string>
+    
+    <string name="default_video_view_mode">Default Video View Mode</string>
+    <string name="default_video_view_mode_desc">Configure standard view mode layout for Videos tab</string>
+    <string name="photos_grid_columns_setting">Photos Grid Columns</string>
+    <string name="photos_grid_columns_setting_desc">Adjust the number of columns in Photos Grid layout</string>
 </resources>

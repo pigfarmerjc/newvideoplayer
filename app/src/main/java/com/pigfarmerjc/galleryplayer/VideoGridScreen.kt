@@ -2,18 +2,19 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.res.stringResource
-import com.pigfarmerjc.galleryplayer.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,7 +43,11 @@ fun VideoGridScreen(
     onSearchQueryChange: (String) -> Unit,
     sortMode: VideoSortMode,
     onSortModeChange: (VideoSortMode) -> Unit,
-    continueWatchingVideos: List<LocalMediaItem>
+    continueWatchingVideos: List<LocalMediaItem>,
+    videoViewMode: VideoViewMode,
+    onVideoViewModeChange: (VideoViewMode) -> Unit,
+    photosGridColumns: Int,
+    onPhotosGridColumnsChange: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -54,6 +60,10 @@ fun VideoGridScreen(
     val filteredVideos = remember(videos, searchQuery, sortMode) {
         VideoFilterAndSort.filterAndSort(videos, searchQuery, sortMode)
     }
+
+    // Keep separate grid states for Card View and Photos Grid to retain scroll positions
+    val cardGridState = rememberLazyGridState()
+    val photosGridState = rememberLazyGridState()
 
     if (isLoading && videos.isEmpty()) {
         Box(
@@ -103,6 +113,25 @@ fun VideoGridScreen(
         return
     }
 
+    if (videoViewMode == VideoViewMode.PHOTOS_GRID) {
+        PhotosStyleVideoGridScreen(
+            videos = videos,
+            filteredVideos = filteredVideos,
+            continueWatchingVideos = continueWatchingVideos,
+            playbackProgressMap = playbackProgressMap,
+            columns = photosGridColumns,
+            onColumnsChange = onPhotosGridColumnsChange,
+            searchQuery = searchQuery,
+            onSearchQueryChange = onSearchQueryChange,
+            sortMode = sortMode,
+            onSortModeChange = onSortModeChange,
+            onVideoClick = onVideoClick,
+            gridState = photosGridState,
+            onVideoViewModeChange = onVideoViewModeChange
+        )
+        return
+    }
+
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val screenWidth = configuration.screenWidthDp
@@ -119,6 +148,7 @@ fun VideoGridScreen(
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
+            state = cardGridState,
             contentPadding = PaddingValues(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -148,7 +178,7 @@ fun VideoGridScreen(
                         shape = RoundedCornerShape(24.dp)
                     )
 
-                    // Sort menu header row
+                    // Sort menu and View mode header row
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -159,45 +189,57 @@ fun VideoGridScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
 
-                        Box {
-                            var sortExpanded by remember { mutableStateOf(false) }
-                            TextButton(onClick = { sortExpanded = true }) {
-                                Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.sort))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = {
+                                onVideoViewModeChange(VideoViewMode.PHOTOS_GRID)
+                            }) {
+                                Icon(Icons.Default.GridView, contentDescription = "View Mode")
                                 Spacer(modifier = Modifier.width(4.dp))
-                                val label = when (sortMode) {
-                                    VideoSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
-                                    VideoSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
-                                    VideoSortMode.NAME_DESC -> stringResource(R.string.sort_name_desc)
-                                    VideoSortMode.DURATION_DESC -> stringResource(R.string.sort_duration_desc)
-                                    VideoSortMode.DURATION_ASC -> stringResource(R.string.sort_duration_asc)
-                                    VideoSortMode.SIZE_DESC -> stringResource(R.string.sort_size_desc)
-                                    VideoSortMode.SIZE_ASC -> stringResource(R.string.sort_size_asc)
-                                }
-                                Text(label)
+                                Text(stringResource(R.string.photos_grid))
                             }
-                            DropdownMenu(
-                                expanded = sortExpanded,
-                                onDismissRequest = { sortExpanded = false }
-                            ) {
-                                VideoSortMode.values().forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            val text = when (mode) {
-                                                VideoSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
-                                                VideoSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
-                                                VideoSortMode.NAME_DESC -> stringResource(R.string.sort_name_desc)
-                                                VideoSortMode.DURATION_DESC -> stringResource(R.string.sort_duration_desc)
-                                                VideoSortMode.DURATION_ASC -> stringResource(R.string.sort_duration_asc)
-                                                VideoSortMode.SIZE_DESC -> stringResource(R.string.sort_size_desc)
-                                                VideoSortMode.SIZE_ASC -> stringResource(R.string.sort_size_asc)
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Box {
+                                var sortExpanded by remember { mutableStateOf(false) }
+                                TextButton(onClick = { sortExpanded = true }) {
+                                    Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.sort))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    val label = when (sortMode) {
+                                        VideoSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
+                                        VideoSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
+                                        VideoSortMode.NAME_DESC -> stringResource(R.string.sort_name_desc)
+                                        VideoSortMode.DURATION_DESC -> stringResource(R.string.sort_duration_desc)
+                                        VideoSortMode.DURATION_ASC -> stringResource(R.string.sort_duration_asc)
+                                        VideoSortMode.SIZE_DESC -> stringResource(R.string.sort_size_desc)
+                                        VideoSortMode.SIZE_ASC -> stringResource(R.string.sort_size_asc)
+                                    }
+                                    Text(label)
+                                }
+                                DropdownMenu(
+                                    expanded = sortExpanded,
+                                    onDismissRequest = { sortExpanded = false }
+                                ) {
+                                    VideoSortMode.values().forEach { mode ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                val text = when (mode) {
+                                                    VideoSortMode.DATE_MODIFIED_DESC -> stringResource(R.string.sort_recent)
+                                                    VideoSortMode.NAME_ASC -> stringResource(R.string.sort_name_asc)
+                                                    VideoSortMode.NAME_DESC -> stringResource(R.string.sort_name_desc)
+                                                    VideoSortMode.DURATION_DESC -> stringResource(R.string.sort_duration_desc)
+                                                    VideoSortMode.DURATION_ASC -> stringResource(R.string.sort_duration_asc)
+                                                    VideoSortMode.SIZE_DESC -> stringResource(R.string.sort_size_desc)
+                                                    VideoSortMode.SIZE_ASC -> stringResource(R.string.sort_size_asc)
+                                                }
+                                                Text(text)
+                                            },
+                                            onClick = {
+                                                onSortModeChange(mode)
+                                                sortExpanded = false
                                             }
-                                            Text(text)
-                                        },
-                                        onClick = {
-                                            onSortModeChange(mode)
-                                            sortExpanded = false
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -265,7 +307,7 @@ fun VideoGridScreen(
                     VideoCard(
                         video = video,
                         progressRatio = playbackProgressMap[video.contentUri],
-                        onClick = { onVideoClick(video, videos) }
+                        onClick = { onVideoClick(video, filteredVideos) } // Pass filteredVideos as user requested
                     )
                 }
             }

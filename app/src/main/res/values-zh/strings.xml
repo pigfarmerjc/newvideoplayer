@@ -87,4 +87,9 @@
     <string name="media_library_refreshed">媒体库已刷新</string>
     <string name="media_library_refresh_failed">刷新失败: %1$s</string>
     <string name="playback_resumed">已从上次位置继续播放</string>
+    
+    <string name="default_video_view_mode">默认视频视图</string>
+    <string name="default_video_view_mode_desc">配置视频标签页的默认布局模式</string>
+    <string name="photos_grid_columns_setting">相册网格列数</string>
+    <string name="photos_grid_columns_setting_desc">调整相册网格视图中的显示列数</string>
 </resources>
