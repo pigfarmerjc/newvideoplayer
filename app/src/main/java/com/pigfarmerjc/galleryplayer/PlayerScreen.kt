@@ -141,7 +141,7 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. Video Surface view is created immediately upon entering the player
+
         AndroidView(
             factory = { ctx ->
                 val host = videoOutputFactory.create(ctx)
@@ -157,7 +157,7 @@ fun PlayerScreen(
             }
         )
 
-        // 2. Gesture Overlay Detector
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -194,7 +194,7 @@ fun PlayerScreen(
                 }
         )
 
-        // 3. UI Controls overlay
+
         if (controlsVisible) {
             // Top Bar
             Row(
