@@ -10,8 +10,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,7 +29,10 @@ fun FolderScreen(
     onFolderClick: (FolderItem) -> Unit,
     onRefresh: () -> Unit,
     isLoading: Boolean,
-    loadError: String?
+    loadError: String?,
+    sortMode: FolderSortMode,
+    onSortModeChange: (FolderSortMode) -> Unit,
+    videos: List<LocalMediaItem>
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -36,6 +40,10 @@ fun FolderScreen(
     if (!hasPermission) {
         InlinePermissionRequest(permissionType = "video", onGranted = onRefresh)
         return
+    }
+
+    val sortedFolders = remember(folders, sortMode, videos) {
+        FolderSort.sort(folders, sortMode, videos)
     }
 
     if (isLoading && folders.isEmpty()) {
@@ -126,14 +134,79 @@ fun FolderScreen(
             if (isLoading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
+
+            // Sort Selector Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Folders (${sortedFolders.size})",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                
+                Box {
+                    var sortExpanded by remember { mutableStateOf(false) }
+                    TextButton(onClick = { sortExpanded = true }) {
+                        Icon(Icons.Default.Sort, contentDescription = "Sort")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        val label = when (sortMode) {
+                            FolderSortMode.NAME_ASC -> "Name A-Z"
+                            FolderSortMode.VIDEO_COUNT_DESC -> "Video Count"
+                            FolderSortMode.TOTAL_SIZE_DESC -> "Total Size"
+                            FolderSortMode.DATE_MODIFIED_DESC -> "Recent Modified"
+                        }
+                        Text(label)
+                    }
+                    DropdownMenu(
+                        expanded = sortExpanded,
+                        onDismissRequest = { sortExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Name A-Z") },
+                            onClick = {
+                                onSortModeChange(FolderSortMode.NAME_ASC)
+                                sortExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Video Count") },
+                            onClick = {
+                                onSortModeChange(FolderSortMode.VIDEO_COUNT_DESC)
+                                sortExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Total Size") },
+                            onClick = {
+                                onSortModeChange(FolderSortMode.TOTAL_SIZE_DESC)
+                                sortExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Recent Modified") },
+                            onClick = {
+                                onSortModeChange(FolderSortMode.DATE_MODIFIED_DESC)
+                                sortExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize().weight(1f)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
             ) {
-                items(folders) { folder ->
+                items(sortedFolders) { folder ->
                     FolderCard(
                         folder = folder,
                         onClick = { onFolderClick(folder) }
