@@ -99,9 +99,9 @@ class PlayerSeekThrottleUnitTest {
             pendingDebounceTarget = currentFingerPosition
             debounceScheduledAt = timeMs
 
-            // Check if debounce timer fired (it won't, because 16ms < 55ms!)
-            if (timeMs - debounceScheduledAt >= debounceDelay && pendingDebounceTarget != null) {
-                debounceSeeks.add(pendingDebounceTarget)
+            val target = pendingDebounceTarget
+            if (timeMs - debounceScheduledAt >= debounceDelay && target != null) {
+                debounceSeeks.add(target)
                 pendingDebounceTarget = null
             }
         }

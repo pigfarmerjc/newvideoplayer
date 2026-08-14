@@ -366,8 +366,13 @@ class MainActivity : ComponentActivity() {
             DisposableEffect(lifecycleOwner) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_PAUSE) {
-                        viewModel.wasPlayingBeforeBackground = (viewModel.playbackEngine.playbackState.value == PlaybackState.Playing)
-                        viewModel.playbackEngine.pause()
+                        val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            this@MainActivity.isInPictureInPictureMode
+                        } else false
+                        if (!inPiP) {
+                            viewModel.wasPlayingBeforeBackground = (viewModel.playbackEngine.playbackState.value == PlaybackState.Playing)
+                            viewModel.playbackEngine.pause()
+                        }
                     } else if (event == Lifecycle.Event.ON_RESUME) {
                         val currentlyGranted = PermissionState.hasAnyStoragePermission(context)
                         if (currentlyGranted != viewModel.permissionsGranted) {

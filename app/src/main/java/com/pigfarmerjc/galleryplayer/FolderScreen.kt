@@ -11,8 +11,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -151,7 +151,7 @@ fun FolderScreen(
                 Box {
                     var sortExpanded by remember { mutableStateOf(false) }
                     TextButton(onClick = { sortExpanded = true }) {
-                        Icon(Icons.Default.Sort, contentDescription = "Sort")
+                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
                         Spacer(modifier = Modifier.width(4.dp))
                         val label = when (sortMode) {
                             FolderSortMode.NAME_ASC -> "名称"

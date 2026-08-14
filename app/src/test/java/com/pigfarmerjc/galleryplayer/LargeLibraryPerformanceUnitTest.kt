@@ -94,7 +94,7 @@ class LargeLibraryPerformanceUnitTest {
         val folders = videos.groupBy { it.relativePath }.map { (path, items) ->
             val folderName = path.trimEnd('/').split('/').lastOrNull() ?: "Root"
             FolderItem(
-                volumeName = items.first().volumeName ?: "external",
+                volumeName = items.first().volumeName,
                 relativePath = path,
                 displayName = folderName,
                 videoCount = items.size,

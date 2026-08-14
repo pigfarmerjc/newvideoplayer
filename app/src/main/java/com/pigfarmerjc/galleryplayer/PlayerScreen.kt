@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -91,6 +92,11 @@ fun PlayerScreen(
     // Multi-speed level separation
     var currentSpeed by remember(videoUri) { mutableStateOf(defaultSpeed) }
     var hasAppliedDefaultSpeed by remember(videoUri) { mutableStateOf(false) }
+    var isHoldingSpeed by remember { mutableStateOf(false) }
+
+    // Double-tap visual feedback state (isLeft, seconds)
+    var doubleTapFeedback by remember { mutableStateOf<Pair<Boolean, Int>?>(null) }
+    var feedbackJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     // Keep track of the active video output host
     var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
@@ -322,17 +328,25 @@ fun PlayerScreen(
                             } else {
                                 playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
                             }
+                            feedbackJob?.cancel()
+                            doubleTapFeedback = Pair(isLeft, skipSeconds)
+                            feedbackJob = coroutineScope.launch {
+                                delay(650)
+                                doubleTapFeedback = null
+                            }
                         },
                         onPress = {
                             var isLongPress = false
                             val job = coroutineScope.launch {
-                                delay(500)
+                                delay(400)
                                 isLongPress = true
+                                isHoldingSpeed = true
                                 playbackEngine.setSpeed(2.0f)
                             }
                             tryAwaitRelease()
                             job.cancel()
                             if (isLongPress) {
+                                isHoldingSpeed = false
                                 playbackEngine.setSpeed(currentSpeed)
                             }
                         }
@@ -357,7 +371,6 @@ fun PlayerScreen(
                                 gestureSettling = false
                             }
                             velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            // Avoid registering drag if we're touching active seekbar or buttons (handled by click checks)
                             dragOffsetX += dragAmount.x
                             dragOffsetY += dragAmount.y
 
@@ -475,6 +488,76 @@ fun PlayerScreen(
                 }
         )
 
+        // Double-Tap Seek Feedback Overlay Indicator
+        AnimatedVisibility(
+            visible = doubleTapFeedback != null,
+            enter = fadeIn(tween(100)),
+            exit = fadeOut(tween(250)),
+            modifier = Modifier
+                .align(if (doubleTapFeedback?.first == true) Alignment.CenterStart else Alignment.CenterEnd)
+                .padding(horizontal = 48.dp)
+        ) {
+            val isLeft = doubleTapFeedback?.first == true
+            val secs = doubleTapFeedback?.second ?: skipSeconds
+            Surface(
+                color = Color.Black.copy(alpha = 0.72f),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        if (isLeft) Icons.Filled.FastRewind else Icons.Filled.FastForward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = if (isLeft) "-${secs}秒" else "+${secs}秒",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+
+        // Hold-to-Speed 2.0x HUD Indicator
+        AnimatedVisibility(
+            visible = isHoldingSpeed,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(160)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 18.dp)
+        ) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.82f),
+                shape = RoundedCornerShape(20.dp),
+                tonalElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.FastForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "2.0× 快进中",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            }
+        }
+
         if (state == PlaybackState.Opening || state == PlaybackState.Buffering) {
             CircularProgressIndicator(
                 color = Color.White,
@@ -540,6 +623,17 @@ fun PlayerScreen(
                         maxLines = 1,
                         modifier = Modifier.weight(1f)
                     )
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        IconButton(onClick = {
+                            val activity = context.findActivity()
+                            if (activity != null) {
+                                val params = android.app.PictureInPictureParams.Builder().build()
+                                activity.enterPictureInPictureMode(params)
+                            }
+                        }) {
+                            Icon(Icons.Filled.PictureInPictureAlt, contentDescription = "画中画", tint = Color.White)
+                        }
+                    }
                     IconButton(onClick = {
                         val nextMode = when (repeatMode) {
                             PlaybackRepeatMode.NONE -> PlaybackRepeatMode.ONE
@@ -549,7 +643,7 @@ fun PlayerScreen(
                         onRepeatModeChange(nextMode)
                     }) {
                         val (icon, desc) = when (repeatMode) {
-                            PlaybackRepeatMode.NONE -> Icons.Filled.TrendingFlat to "播放一次"
+                            PlaybackRepeatMode.NONE -> Icons.AutoMirrored.Filled.TrendingFlat to "播放一次"
                             PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne to "单曲循环"
                             PlaybackRepeatMode.ALL -> Icons.Filled.Repeat to "列表循环"
                         }

@@ -26,10 +26,10 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -43,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -184,7 +185,7 @@ private fun SortMenu(sortMode: VideoSortMode, onSortModeChange: (VideoSortMode) 
     var expanded by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { expanded = true }) {
-            Icon(Icons.Filled.Sort, contentDescription = "排序", modifier = Modifier.size(18.dp))
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序", modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(4.dp))
             Text(sortLabel(sortMode))
         }
@@ -318,6 +319,36 @@ fun VideoCard(video: LocalMediaItem, progressRatio: Float?, onClick: () -> Unit)
                     .aspectRatio(16f / 9f)
             ) {
                 MediaThumbnail(video.contentUri, MediaType.VIDEO, Modifier.fillMaxSize(), 420, 236)
+                if (video.width != null && video.height != null) {
+                    if (GalleryLayout.is4K(video.width, video.height)) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
+                        ) {
+                            Text(
+                                text = "4K",
+                                color = Color(0xFFFFD700),
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    } else if (GalleryLayout.isHD(video.width, video.height)) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.60f),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
+                        ) {
+                            Text(
+                                text = "HD",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 if (video.durationMs != null) {
                     Surface(
                         color = Color.Black.copy(alpha = 0.72f),
@@ -358,7 +389,13 @@ fun VideoCard(video: LocalMediaItem, progressRatio: Float?, onClick: () -> Unit)
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    if (video.width != null && video.height != null) {
+                    if (video.fileSize > 0L) {
+                        Text(
+                            text = GalleryLayout.formatFileSize(video.fileSize),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else if (video.width != null && video.height != null) {
                         Text("${video.width}×${video.height}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
