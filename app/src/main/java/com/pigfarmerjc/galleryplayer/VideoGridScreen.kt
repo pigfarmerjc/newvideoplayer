@@ -1,28 +1,63 @@
 package com.pigfarmerjc.galleryplayer
 
 import android.content.res.Configuration
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
@@ -35,235 +70,78 @@ fun VideoGridScreen(
     isLoading: Boolean,
     loadError: String?,
     playbackProgressMap: Map<String, Float> = emptyMap(),
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
     sortMode: VideoSortMode,
     onSortModeChange: (VideoSortMode) -> Unit,
-    continueWatchingVideos: List<LocalMediaItem>
+    continueWatchingVideos: List<LocalMediaItem>,
+    gridState: LazyGridState = rememberLazyGridState()
 ) {
-    val context = LocalContext.current
-    val hasPermission = PermissionState.hasVideoPermission(context)
-
-    if (!hasPermission) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (!PermissionState.hasVideoPermission(context)) {
         InlinePermissionRequest(permissionType = "video", onGranted = onRefresh)
         return
     }
 
-    val filteredVideos = remember(videos, searchQuery, sortMode) {
-        VideoFilterAndSort.filterAndSort(videos, searchQuery, sortMode)
+    val filteredVideos by remember(videos, sortMode) {
+        derivedStateOf { VideoFilterAndSort.filterAndSort(videos, "", sortMode) }
     }
-
-    if (isLoading && videos.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                CircularProgressIndicator()
-                Text("Loading local videos...", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        return
-    }
-
-    if (loadError != null && videos.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(24.dp)
-            ) {
-                Text(
-                    text = "Failed to load videos",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-                Text(
-                    text = loadError,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
-                }
-            }
-        }
-        return
-    }
-
     val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val screenWidth = configuration.screenWidthDp
-
-    val columns = when {
-        screenWidth >= 600 -> if (isLandscape) 6 else 4
-        else -> if (isLandscape) 3 else 2
+    val columns = GalleryLayout.columnsForWidth(
+        configuration.screenWidthDp,
+        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    )
+    if (isLoading && videos.isEmpty()) {
+        GalleryLoadingState()
+        return
+    }
+    if (loadError != null && videos.isEmpty()) {
+        GalleryErrorState(message = loadError, onRetry = onRefresh)
+        return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        if (isLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
+        if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
-            contentPadding = PaddingValues(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            state = gridState,
+            contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize().weight(1f)
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Header: Search & Sort
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Search Input
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        placeholder = { Text("Search videos or folders...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { onSearchQueryChange("") }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear")
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(24.dp)
-                    )
-
-                    // Sort menu header row
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Videos (${filteredVideos.size})",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
-                        Box {
-                            var sortExpanded by remember { mutableStateOf(false) }
-                            TextButton(onClick = { sortExpanded = true }) {
-                                Icon(Icons.Default.Sort, contentDescription = "Sort")
-                                Spacer(modifier = Modifier.width(4.dp))
-                                val label = when (sortMode) {
-                                    VideoSortMode.DATE_MODIFIED_DESC -> "Recently Modified"
-                                    VideoSortMode.NAME_ASC -> "Name A-Z"
-                                    VideoSortMode.NAME_DESC -> "Name Z-A"
-                                    VideoSortMode.DURATION_DESC -> "Duration (Long)"
-                                    VideoSortMode.DURATION_ASC -> "Duration (Short)"
-                                    VideoSortMode.SIZE_DESC -> "Size (Large)"
-                                    VideoSortMode.SIZE_ASC -> "Size (Small)"
-                                }
-                                Text(label)
-                            }
-                            DropdownMenu(
-                                expanded = sortExpanded,
-                                onDismissRequest = { sortExpanded = false }
-                            ) {
-                                VideoSortMode.values().forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            val text = when (mode) {
-                                                VideoSortMode.DATE_MODIFIED_DESC -> "Recently Modified"
-                                                VideoSortMode.NAME_ASC -> "Name A-Z"
-                                                VideoSortMode.NAME_DESC -> "Name Z-A"
-                                                VideoSortMode.DURATION_DESC -> "Duration (Long)"
-                                                VideoSortMode.DURATION_ASC -> "Duration (Short)"
-                                                VideoSortMode.SIZE_DESC -> "Size (Large)"
-                                                VideoSortMode.SIZE_ASC -> "Size (Small)"
-                                            }
-                                            Text(text)
-                                        },
-                                        onClick = {
-                                            onSortModeChange(mode)
-                                            sortExpanded = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                VideoLibraryHeader(
+                    count = filteredVideos.size,
+                    sortMode = sortMode,
+                    onSortModeChange = onSortModeChange
+                )
             }
 
-            // Continue Watching carousel row
-            if (continueWatchingVideos.isNotEmpty() && searchQuery.isEmpty()) {
+            if (continueWatchingVideos.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "Continue Watching",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(
-                                items = continueWatchingVideos,
-                                key = { it.contentUri }
-                            ) { video ->
-                                val progressRatio = playbackProgressMap[video.contentUri]
-                                ContinueWatchingCard(
-                                    video = video,
-                                    progressRatio = progressRatio,
-                                    onClick = { onVideoClick(video, videos) }
-                                )
-                            }
-                        }
-                    }
+                    ContinueWatchingSection(
+                        videos = continueWatchingVideos,
+                        playbackProgressMap = playbackProgressMap,
+                        allVideos = filteredVideos,
+                        onVideoClick = onVideoClick
+                    )
                 }
             }
 
-            // Empty state or main items grid
             if (filteredVideos.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "No matching videos found",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    GalleryEmptyState(onRefresh = onRefresh)
                 }
             } else {
                 items(
                     items = filteredVideos,
-                    key = { it.contentUri }
+                    key = { it.contentUri },
+                    contentType = { "video-card" }
                 ) { video ->
                     VideoCard(
                         video = video,
                         progressRatio = playbackProgressMap[video.contentUri],
-                        onClick = { onVideoClick(video, videos) }
+                        onClick = { onVideoClick(video, filteredVideos) }
                     )
                 }
             }
@@ -272,168 +150,265 @@ fun VideoGridScreen(
 }
 
 @Composable
-fun ContinueWatchingCard(
-    video: LocalMediaItem,
-    progressRatio: Float?,
-    onClick: () -> Unit
+private fun VideoLibraryHeader(
+    count: Int,
+    sortMode: VideoSortMode,
+    onSortModeChange: (VideoSortMode) -> Unit
 ) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("视频库", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = if (count == 0) "还没有视频" else "$count 个视频 · 最近更新",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            SortMenu(sortMode = sortMode, onSortModeChange = onSortModeChange)
+        }
+    }
+}
+
+@Composable
+private fun SortMenu(sortMode: VideoSortMode, onSortModeChange: (VideoSortMode) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Icon(Icons.Filled.Sort, contentDescription = "排序", modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(sortLabel(sortMode))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            VideoSortMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(sortLabel(mode)) },
+                    onClick = {
+                        onSortModeChange(mode)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun sortLabel(mode: VideoSortMode): String = when (mode) {
+    VideoSortMode.DATE_MODIFIED_DESC -> "最近更新"
+    VideoSortMode.NAME_ASC -> "名称 A–Z"
+    VideoSortMode.NAME_DESC -> "名称 Z–A"
+    VideoSortMode.DURATION_DESC -> "时长最长"
+    VideoSortMode.DURATION_ASC -> "时长最短"
+    VideoSortMode.SIZE_DESC -> "文件最大"
+    VideoSortMode.SIZE_ASC -> "文件最小"
+}
+
+@Composable
+private fun ContinueWatchingSection(
+    videos: List<LocalMediaItem>,
+    playbackProgressMap: Map<String, Float>,
+    allVideos: List<LocalMediaItem>,
+    onVideoClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp, bottom = 6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("继续观看", style = MaterialTheme.typography.titleLarge)
+            Text("最近播放", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(end = 16.dp)
+        ) {
+            items(videos, key = { it.contentUri }) { video ->
+                ContinueWatchingCard(
+                    video = video,
+                    progressRatio = playbackProgressMap[video.contentUri],
+                    onClick = { onVideoClick(video, allVideos) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ContinueWatchingCard(video: LocalMediaItem, progressRatio: Float?, onClick: () -> Unit) {
     Card(
         modifier = Modifier
-            .width(160.dp)
-            .clickable { onClick() },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .width(210.dp)
+            .semantics { role = Role.Button }
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+        ) {
+            MediaThumbnail(video.contentUri, MediaType.VIDEO, Modifier.fillMaxSize(), 420, 236)
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-            ) {
-                MediaThumbnail(
-                    contentUri = video.contentUri,
-                    mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize(),
-                    width = 320,
-                    height = 180
-                )
-
-                // Overlay active linear progress indicator at the bottom of the thumbnail
-                if (progressRatio != null && progressRatio in 0.01f..0.99f) {
-                    LinearProgressIndicator(
-                        progress = { progressRatio },
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(3.dp)
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
+                        )
                     )
-                }
-            }
+            )
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = "继续播放",
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(38.dp)
+            )
             Text(
                 text = video.displayName,
-                style = MaterialTheme.typography.bodySmall,
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(6.dp)
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp)
             )
+            if (progressRatio != null) {
+                LinearProgressIndicator(
+                    progress = { progressRatio.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(3.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.White.copy(alpha = 0.28f)
+                )
+            }
         }
     }
 }
 
 @Composable
-fun VideoCard(
-    video: LocalMediaItem,
-    progressRatio: Float?,
-    onClick: () -> Unit
-) {
+fun VideoCard(video: LocalMediaItem, progressRatio: Float?, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+            .semantics { role = Role.Button }
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
             ) {
-                MediaThumbnail(
-                    contentUri = video.contentUri,
-                    mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize(),
-                    width = 320,
-                    height = 180
-                )
-                
+                MediaThumbnail(video.contentUri, MediaType.VIDEO, Modifier.fillMaxSize(), 420, 236)
                 if (video.durationMs != null) {
                     Surface(
-                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp)
+                        color = Color.Black.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(7.dp)
                     ) {
                         Text(
                             text = formatDuration(video.durationMs),
-                            color = MaterialTheme.colorScheme.onPrimary,
+                            color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                         )
                     }
                 }
-
-                // Overlay active linear progress indicator at the bottom of the thumbnail
-                if (progressRatio != null && progressRatio in 0.01f..0.99f) {
+                if (progressRatio != null) {
                     LinearProgressIndicator(
-                        progress = { progressRatio },
+                        progress = { progressRatio.coerceIn(0f, 1f) },
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
                         color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(3.dp)
+                        trackColor = Color.White.copy(alpha = 0.22f)
                     )
                 }
             }
-
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
-                    text = video.displayName,
+                    video.displayName,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val folderName = video.relativePath.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            text = folderName,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = video.relativePath.trimEnd('/').substringAfterLast('/').ifBlank { "根目录" },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     if (video.width != null && video.height != null) {
-                        Text(
-                            text = "${video.width}x${video.height}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                        Text("${video.width}×${video.height}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GalleryLoadingState() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator()
+            Text("正在整理视频…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun GalleryErrorState(message: String, onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("视频库暂时无法打开", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
+            Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onRetry) {
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("重新扫描")
+            }
+        }
+    }
+}
+
+@Composable
+private fun GalleryEmptyState(onRefresh: () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(42.dp))
+            Text("还没有找到视频", style = MaterialTheme.typography.titleMedium)
+            Text("把视频放入设备后重新扫描", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = onRefresh) { Text("重新扫描") }
         }
     }
 }
 
 private fun formatDuration(ms: Long): String {
-    val totalSecs = ms / 1000
+    val totalSecs = ms.coerceAtLeast(0L) / 1000
     val hours = totalSecs / 3600
     val minutes = (totalSecs % 3600) / 60
     val seconds = totalSecs % 60
-    return if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format("%02d:%02d", minutes, seconds)
-    }
+    return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, seconds)
+    else "%02d:%02d".format(minutes, seconds)
 }

@@ -59,7 +59,7 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = "Settings",
+            text = "设置",
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 12.dp)
         )
@@ -70,11 +70,11 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
             ListItem(
-                headlineContent = { Text("Re-scan Media") },
-                supportingContent = { Text("Triggers local MediaStore and SAF files scanner refresh") },
+                headlineContent = { Text("重新扫描媒体") },
+                supportingContent = { Text("刷新设备存储和已授权目录中的媒体") },
                 trailingContent = {
                     Button(onClick = onReload) {
-                        Text("Scan")
+                        Text("扫描")
                     }
                 }
             )
@@ -87,12 +87,12 @@ fun SettingsScreen(
         ) {
             var decExpanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text("Playback Decoder Mode") },
-                supportingContent = { Text("Auto / Forced Hardware / Software Only (for 4K testing)") },
+                headlineContent = { Text("视频解码模式") },
+                supportingContent = { Text("遇到 4K 或特殊编码卡顿时可切换") },
                 trailingContent = {
                     Box {
                         TextButton(onClick = { decExpanded = true }) {
-                            Text(decoderModeState.name)
+                            Text(decoderModeLabel(decoderModeState))
                         }
                         DropdownMenu(
                             expanded = decExpanded,
@@ -100,7 +100,7 @@ fun SettingsScreen(
                         ) {
                             DecoderMode.values().forEach { mode ->
                                 DropdownMenuItem(
-                                    text = { Text(mode.name) },
+                                    text = { Text(decoderModeLabel(mode)) },
                                     onClick = {
                                         onDecoderModeChange(mode)
                                         decExpanded = false
@@ -125,11 +125,11 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("External SAF Folders", style = MaterialTheme.typography.titleMedium)
-                        Text("Add TF card or custom directory to scan", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("外部存储目录", style = MaterialTheme.typography.titleMedium)
+                        Text("添加 TF 卡或自定义目录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Button(onClick = { safPickerLauncher.launch(null) }) {
-                        Text("Add Folder")
+                        Text("添加目录")
                     }
                 }
                 if (safAuthorizedFolders.isNotEmpty()) {
@@ -151,7 +151,7 @@ fun SettingsScreen(
                                 onRemoveSafFolder(folderUri)
                                 onReload()
                             }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove")
+                                Icon(Icons.Default.Delete, contentDescription = "移除")
                             }
                         }
                     }
@@ -166,8 +166,8 @@ fun SettingsScreen(
         ) {
             var speedExpanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text("Default Playback Speed") },
-                supportingContent = { Text("Configures initial multiplier speed") },
+                headlineContent = { Text("默认播放速度") },
+                supportingContent = { Text("新视频开始播放时使用的速度") },
                 trailingContent = {
                     Box {
                         TextButton(onClick = { speedExpanded = true }) {
@@ -199,8 +199,8 @@ fun SettingsScreen(
         ) {
             var skipExpanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text("Double-tap Skip Seconds") },
-                supportingContent = { Text("Duration for skip gestures seeking") },
+                headlineContent = { Text("双击快进与快退") },
+                supportingContent = { Text("播放器双击手势的跳转秒数") },
                 trailingContent = {
                     Box {
                         TextButton(onClick = { skipExpanded = true }) {
@@ -231,8 +231,8 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
             ListItem(
-                headlineContent = { Text("About") },
-                supportingContent = { Text("GalleryPlayer Local MVP Player v1.0") }
+                headlineContent = { Text("关于") },
+                supportingContent = { Text("GalleryPlayer 本地视频播放器 1.0") }
             )
         }
 
@@ -244,12 +244,12 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             ListItem(
-                headlineContent = { Text("Diagnostics & Debug Info", color = MaterialTheme.colorScheme.onPrimaryContainer) },
-                supportingContent = { Text("Inspect engine statuses and media totals", color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)) },
+                headlineContent = { Text("播放诊断", color = MaterialTheme.colorScheme.onPrimaryContainer) },
+                supportingContent = { Text("查看解码器、媒体统计和错误信息", color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)) },
                 trailingContent = {
                     Icon(
                         imageVector = Icons.Default.Info,
-                        contentDescription = "Diagnostics",
+                        contentDescription = "播放诊断",
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
@@ -340,4 +340,10 @@ fun SettingsScreen(
             }
         )
     }
+}
+
+private fun decoderModeLabel(mode: DecoderMode): String = when (mode) {
+    DecoderMode.AUTO -> "自动"
+    DecoderMode.HARDWARE_FORCED -> "强制硬件解码"
+    DecoderMode.SOFTWARE_ONLY -> "仅软件解码"
 }

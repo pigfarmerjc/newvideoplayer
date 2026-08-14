@@ -5,7 +5,12 @@ import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,8 +24,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -71,8 +78,13 @@ fun PlayerScreen(
     val duration by playbackEngine.durationMs.collectAsState()
     val isSeekable by playbackEngine.isSeekable.collectAsState()
     val speed by playbackEngine.playbackSpeed.collectAsState()
+    val diagnostics by playbackEngine.diagnostics.collectAsState()
+    val audioTracks by playbackEngine.audioTracks.collectAsState()
+    val subtitleTracks by playbackEngine.subtitleTracks.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
+    var speedExpanded by remember { mutableStateOf(false) }
+    var tracksExpanded by remember { mutableStateOf(false) }
     var isDragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableStateOf(0f) }
 
@@ -93,6 +105,8 @@ fun PlayerScreen(
     var dragOffsetX by remember { mutableStateOf(0f) }
     var dragOffsetY by remember { mutableStateOf(0f) }
     var dragDirection by remember { mutableStateOf(DragDirection.Undecided) }
+    var gestureSettling by remember { mutableStateOf(false) }
+    var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val density = LocalDensity.current
     val horizontalThresholdPx = remember { with(density) { 100.dp.toPx() } }
@@ -167,6 +181,23 @@ fun PlayerScreen(
         }
     }
 
+    // Throttled preview seeking during continuous drag:
+    // Periodically reads latest dragPosition every ~45ms without cancelling on each touch event,
+    // so video frames follow the finger continuously during dragging.
+    LaunchedEffect(isDragging, isSeekable, duration) {
+        if (isDragging && isSeekable && duration > 0L) {
+            var lastDispatchedSeek = -1L
+            while (isDragging) {
+                val targetMs = PlayerSeekThrottle.clampPosition(dragPosition.toLong(), duration)
+                if (targetMs != lastDispatchedSeek) {
+                    playbackEngine.seekTo(targetMs)
+                    lastDispatchedSeek = targetMs
+                }
+                delay(PlayerSeekThrottle.THROTTLE_INTERVAL_MS)
+            }
+        }
+    }
+
     // Handle playback ended state based on PlaybackRepeatMode
     LaunchedEffect(state) {
         if (state == PlaybackState.Ended) {
@@ -236,9 +267,24 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .graphicsLayer {
-                // Apply translation downward displacement for reactive swipe down interaction
-                if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
-                    translationY = dragOffsetY
+                when (dragDirection) {
+                    DragDirection.Horizontal -> {
+                        translationX = dragOffsetX
+                        if (size.width > 0f) {
+                            alpha = 1f - (abs(dragOffsetX) / size.width).coerceIn(0f, 1f) * 0.18f
+                        }
+                    }
+                    DragDirection.Vertical -> {
+                        val progress = if (size.height > 0f) {
+                            (dragOffsetY.coerceAtLeast(0f) / size.height).coerceIn(0f, 1f)
+                        } else 0f
+                        translationY = dragOffsetY.coerceAtLeast(0f)
+                        scaleX = 1f - progress * 0.08f
+                        scaleY = 1f - progress * 0.08f
+                        clip = progress > 0f
+                        shape = RoundedCornerShape((24f * progress).dp)
+                    }
+                    DragDirection.Undecided -> Unit
                 }
             }
     ) {
@@ -293,13 +339,24 @@ fun PlayerScreen(
                     )
                 }
                 .pointerInput(currentIndex, videoList.size) {
+                    var velocityTracker = VelocityTracker()
                     detectDragGestures(
                         onDragStart = {
+                            settleJob?.cancel()
+                            settleJob = null
+                            gestureSettling = false
                             dragOffsetX = 0f
                             dragOffsetY = 0f
                             dragDirection = DragDirection.Undecided
+                            velocityTracker = VelocityTracker()
                         },
                         onDrag = { change, dragAmount ->
+                            if (gestureSettling) {
+                                settleJob?.cancel()
+                                settleJob = null
+                                gestureSettling = false
+                            }
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
                             // Avoid registering drag if we're touching active seekbar or buttons (handled by click checks)
                             dragOffsetX += dragAmount.x
                             dragOffsetY += dragAmount.y
@@ -324,201 +381,165 @@ fun PlayerScreen(
                             }
                         },
                         onDragEnd = {
+                            if (gestureSettling) return@detectDragGestures
+                            val velocity = velocityTracker.calculateVelocity()
                             val action = PlayerGestureState.determineAction(
                                 dragOffsetX = dragOffsetX,
                                 dragOffsetY = dragOffsetY,
                                 horizontalThresholdPx = horizontalThresholdPx,
                                 verticalThresholdPx = verticalThresholdPx,
                                 currentIndex = currentIndex,
-                                lastIndex = videoList.size - 1
+                                lastIndex = videoList.size - 1,
+                                velocityX = velocity.x,
+                                velocityY = velocity.y
                             )
 
                             when (action) {
                                 PlayerDragAction.Previous -> {
-                                    saveProgressAndStop()
-                                    onChangeVideo(currentIndex - 1)
+                                    gestureSettling = true
+                                    settleJob = coroutineScope.launch {
+                                        val anim = Animatable(dragOffsetX)
+                                        anim.animateTo(size.width.toFloat(), tween(160)) { dragOffsetX = value }
+                                        saveProgressAndStop()
+                                        onChangeVideo(currentIndex - 1)
+                                        dragOffsetX = 0f
+                                        dragDirection = DragDirection.Undecided
+                                        gestureSettling = false
+                                        settleJob = null
+                                    }
                                 }
                                 PlayerDragAction.Next -> {
-                                    saveProgressAndStop()
-                                    onChangeVideo(currentIndex + 1)
+                                    gestureSettling = true
+                                    settleJob = coroutineScope.launch {
+                                        val anim = Animatable(dragOffsetX)
+                                        anim.animateTo(-size.width.toFloat(), tween(160)) { dragOffsetX = value }
+                                        saveProgressAndStop()
+                                        onChangeVideo(currentIndex + 1)
+                                        dragOffsetX = 0f
+                                        dragDirection = DragDirection.Undecided
+                                        gestureSettling = false
+                                        settleJob = null
+                                    }
                                 }
                                 PlayerDragAction.Dismiss -> {
-                                    saveProgressAndStop()
-                                    onBack()
+                                    gestureSettling = true
+                                    settleJob = coroutineScope.launch {
+                                        val anim = Animatable(dragOffsetY)
+                                        anim.animateTo(size.height.toFloat(), tween(180)) { dragOffsetY = value }
+                                        saveProgressAndStop()
+                                        onBack()
+                                        gestureSettling = false
+                                        settleJob = null
+                                    }
                                 }
                                 PlayerDragAction.None -> {
-                                    if (dragDirection == DragDirection.Vertical) {
-                                        // Snap back to original position
-                                        coroutineScope.launch {
-                                            val anim = Animatable(dragOffsetY)
-                                            anim.animateTo(0f, animationSpec = spring()) {
-                                                dragOffsetY = value
-                                            }
+                                    val settledDirection = dragDirection
+                                    gestureSettling = true
+                                    settleJob = coroutineScope.launch {
+                                        val animation = spring<Float>(
+                                            dampingRatio = 0.86f,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                        if (settledDirection == DragDirection.Vertical) {
+                                            Animatable(dragOffsetY).animateTo(0f, animation) { dragOffsetY = value }
+                                        } else if (settledDirection == DragDirection.Horizontal) {
+                                            Animatable(dragOffsetX).animateTo(0f, animation) { dragOffsetX = value }
                                         }
+                                        dragOffsetX = 0f
+                                        dragOffsetY = 0f
+                                        dragDirection = DragDirection.Undecided
+                                        gestureSettling = false
+                                        settleJob = null
                                     }
                                 }
                             }
-
-                            dragOffsetX = 0f
-                            dragOffsetY = 0f
-                            dragDirection = DragDirection.Undecided
                         },
                         onDragCancel = {
-                            coroutineScope.launch {
-                                val anim = Animatable(dragOffsetY)
-                                anim.animateTo(0f) {
-                                    dragOffsetY = value
+                            val settledDirection = dragDirection
+                            gestureSettling = true
+                            settleJob = coroutineScope.launch {
+                                val animation = spring<Float>(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow)
+                                if (settledDirection == DragDirection.Vertical) {
+                                    Animatable(dragOffsetY).animateTo(0f, animation) { dragOffsetY = value }
+                                } else if (settledDirection == DragDirection.Horizontal) {
+                                    Animatable(dragOffsetX).animateTo(0f, animation) { dragOffsetX = value }
                                 }
+                                dragOffsetX = 0f
+                                dragOffsetY = 0f
+                                dragDirection = DragDirection.Undecided
+                                gestureSettling = false
+                                settleJob = null
                             }
-                            dragOffsetX = 0f
-                            dragOffsetY = 0f
-                            dragDirection = DragDirection.Undecided
                         }
                     )
                 }
         )
 
-        if (controlsVisible) {
-            // Top Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(8.dp)
-                    .align(Alignment.TopCenter),
-                verticalAlignment = Alignment.CenterVertically
+        if (state == PlaybackState.Opening || state == PlaybackState.Buffering) {
+            CircularProgressIndicator(
+                color = Color.White,
+                modifier = Modifier.align(Alignment.Center).size(38.dp)
+            )
+        } else if (state == PlaybackState.Error) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.82f),
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.align(Alignment.Center).padding(24.dp)
             ) {
-                IconButton(onClick = {
-                    saveProgressAndStop()
-                    onBack()
-                }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = videoTitle,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1
-                )
-            }
-
-            // Bottom controls panel
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.6f))
-                    .padding(16.dp)
-                    .align(Alignment.BottomCenter),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Seekbar and time layout
-                val sliderValue = if (isDragging) dragPosition else position.toFloat()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Column(
+                    modifier = Modifier.padding(22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Slider(
-                        value = sliderValue,
-                        onValueChange = {
-                            isDragging = true
-                            dragPosition = it
-                        },
-                        onValueChangeFinished = {
-                            isDragging = false
-                            playbackEngine.seekTo(dragPosition.toLong())
-                        },
-                        valueRange = 0f..maxOf(duration.toFloat(), 1f),
-                        enabled = isSeekable && duration > 0,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Text("无法播放此视频", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     Text(
-                        text = "${formatTime(sliderValue.toLong())} / ${formatTime(duration)}",
-                        color = Color.White,
+                        diagnostics.lastError.ifBlank { "请检查文件是否完整，或尝试切换解码模式。" },
+                        color = Color.White.copy(alpha = 0.7f),
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onBack) { Text("返回") }
+                        Button(onClick = {
+                            coroutineScope.launch { playbackEngine.open(android.net.Uri.parse(videoUri)) }
+                        }) { Text("重试") }
+                    }
                 }
+            }
+        }
 
-                // Control buttons row
+        AnimatedVisibility(
+            visible = controlsVisible,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(110))
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Black.copy(alpha = 0.82f), Color.Transparent)
+                            )
+                        )
+                        .statusBarsPadding()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Previous Button
-                    val hasPrev = currentIndex > 0
-                    IconButton(
-                        onClick = {
-                            saveProgressAndStop()
-                            onChangeVideo(currentIndex - 1)
-                        },
-                        enabled = hasPrev
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SkipPrevious,
-                            contentDescription = "Previous",
-                            tint = if (hasPrev) Color.White else Color.Gray,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-
-                    // Seek Backward Custom Seconds
-                    TextButton(onClick = {
-                        playbackEngine.seekTo(maxOf(position - skipSeconds * 1000L, 0L))
+                    IconButton(onClick = {
+                        saveProgressAndStop()
+                        onBack()
                     }) {
-                        Text(
-                            text = "-${skipSeconds}s",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
                     }
-
-                    // Play / Pause Toggle (Enlarged)
-                    IconButton(
-                        onClick = {
-                            if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
-                        },
-                        modifier = Modifier.size(64.dp)
-                    ) {
-                        val icon = if (state == PlaybackState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = "Play/Pause",
-                            tint = Color.White,
-                            modifier = Modifier.size(40.dp)
-                        )
-                    }
-
-                    // Seek Forward Custom Seconds
-                    TextButton(onClick = {
-                        playbackEngine.seekTo(minOf(position + skipSeconds * 1000L, duration))
-                    }) {
-                        Text(
-                            text = "+${skipSeconds}s",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-
-                    // Next Button
-                    val hasNext = currentIndex < videoList.size - 1
-                    IconButton(
-                        onClick = {
-                            saveProgressAndStop()
-                            onChangeVideo(currentIndex + 1)
-                        },
-                        enabled = hasNext
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.SkipNext,
-                            contentDescription = "Next",
-                            tint = if (hasNext) Color.White else Color.Gray,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-
-                    // Playback Repeat Mode Cycle Button
+                    Text(
+                        text = videoTitle,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
                     IconButton(onClick = {
                         val nextMode = when (repeatMode) {
                             PlaybackRepeatMode.NONE -> PlaybackRepeatMode.ONE
@@ -528,33 +549,156 @@ fun PlayerScreen(
                         onRepeatModeChange(nextMode)
                     }) {
                         val (icon, desc) = when (repeatMode) {
-                            PlaybackRepeatMode.NONE -> Icons.Filled.TrendingFlat to "Play Once"
-                            PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne to "Repeat One"
-                            PlaybackRepeatMode.ALL -> Icons.Filled.Repeat to "Repeat All"
+                            PlaybackRepeatMode.NONE -> Icons.Filled.TrendingFlat to "播放一次"
+                            PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne to "单曲循环"
+                            PlaybackRepeatMode.ALL -> Icons.Filled.Repeat to "列表循环"
                         }
                         Icon(icon, contentDescription = desc, tint = Color.White)
                     }
-
-                    // Speed selector
-                    var speedExpanded by remember { mutableStateOf(false) }
-                    Box {
-                        Button(onClick = { speedExpanded = true }) {
-                            Text("${currentSpeed}x")
+                    if (audioTracks.size > 1 || subtitleTracks.isNotEmpty()) {
+                        Box {
+                            IconButton(onClick = { tracksExpanded = true }) {
+                                Icon(Icons.Filled.Subtitles, contentDescription = "音轨与字幕", tint = Color.White)
+                            }
+                            DropdownMenu(expanded = tracksExpanded, onDismissRequest = { tracksExpanded = false }) {
+                                if (audioTracks.isNotEmpty()) {
+                                    DropdownMenuItem(text = { Text("音轨") }, onClick = {}, enabled = false)
+                                    audioTracks.forEach { track ->
+                                        DropdownMenuItem(
+                                            text = { Text(track.name) },
+                                            leadingIcon = {
+                                                if (track.selected) Icon(Icons.Filled.Check, contentDescription = null)
+                                                else Spacer(Modifier.size(24.dp))
+                                            },
+                                            onClick = {
+                                                playbackEngine.selectAudioTrack(track.id)
+                                                tracksExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                                if (subtitleTracks.isNotEmpty()) {
+                                    DropdownMenuItem(text = { Text("字幕") }, onClick = {}, enabled = false)
+                                    subtitleTracks.forEach { track ->
+                                        DropdownMenuItem(
+                                            text = { Text(track.name) },
+                                            leadingIcon = {
+                                                if (track.selected) Icon(Icons.Filled.Check, contentDescription = null)
+                                                else Spacer(Modifier.size(24.dp))
+                                            },
+                                            onClick = {
+                                                playbackEngine.selectSubtitleTrack(track.id)
+                                                tracksExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        DropdownMenu(
-                            expanded = speedExpanded,
-                            onDismissRequest = { speedExpanded = false }
-                        ) {
-                            listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { s ->
+                    }
+                    Box {
+                        TextButton(onClick = { speedExpanded = true }) {
+                            Text("${currentSpeed}×", color = Color.White)
+                        }
+                        DropdownMenu(expanded = speedExpanded, onDismissRequest = { speedExpanded = false }) {
+                            listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { newSpeed ->
                                 DropdownMenuItem(
-                                    text = { Text("${s}x") },
+                                    text = { Text("${newSpeed}×") },
                                     onClick = {
-                                        currentSpeed = s
-                                        playbackEngine.setSpeed(s)
+                                        currentSpeed = newSpeed
+                                        playbackEngine.setSpeed(newSpeed)
                                         speedExpanded = false
                                     }
                                 )
                             }
+                        }
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                            )
+                        )
+                        .navigationBarsPadding()
+                        .padding(start = 18.dp, top = 42.dp, end = 18.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    val sliderValue = if (isDragging) dragPosition else position.toFloat()
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatTime(sliderValue.toLong()), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                        Text(formatTime(duration), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                    }
+                    Slider(
+                        value = sliderValue.coerceIn(0f, maxOf(duration.toFloat(), 1f)),
+                        onValueChange = {
+                            isDragging = true
+                            dragPosition = it
+                        },
+                        onValueChangeFinished = {
+                            val finalTarget = PlayerSeekThrottle.clampPosition(dragPosition.toLong(), duration)
+                            playbackEngine.seekTo(finalTarget)
+                            isDragging = false
+                        },
+                        valueRange = 0f..maxOf(duration.toFloat(), 1f),
+                        enabled = isSeekable && duration > 0,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.28f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val hasPrev = currentIndex > 0
+                        val hasNext = currentIndex < videoList.size - 1
+                        IconButton(
+                            onClick = {
+                                saveProgressAndStop()
+                                onChangeVideo(currentIndex - 1)
+                            },
+                            enabled = hasPrev
+                        ) {
+                            Icon(Icons.Filled.SkipPrevious, "上一个", tint = if (hasPrev) Color.White else Color.White.copy(alpha = 0.28f))
+                        }
+                        TextButton(onClick = { playbackEngine.seekTo(maxOf(position - skipSeconds * 1000L, 0L)) }) {
+                            Text("−${skipSeconds}", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        }
+                        FilledIconButton(
+                            onClick = {
+                                if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
+                            },
+                            modifier = Modifier.size(62.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black
+                            )
+                        ) {
+                            Icon(
+                                if (state == PlaybackState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                if (state == PlaybackState.Playing) "暂停" else "播放",
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+                        TextButton(onClick = { playbackEngine.seekTo(minOf(position + skipSeconds * 1000L, duration)) }) {
+                            Text("+${skipSeconds}", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        }
+                        IconButton(
+                            onClick = {
+                                saveProgressAndStop()
+                                onChangeVideo(currentIndex + 1)
+                            },
+                            enabled = hasNext
+                        ) {
+                            Icon(Icons.Filled.SkipNext, "下一个", tint = if (hasNext) Color.White else Color.White.copy(alpha = 0.28f))
                         }
                     }
                 }

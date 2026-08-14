@@ -2,22 +2,42 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 
@@ -27,119 +47,57 @@ fun ImageGridScreen(
     onImageClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit,
     onRefresh: () -> Unit,
     isLoading: Boolean,
-    loadError: String?
+    loadError: String?,
+    gridState: LazyGridState = rememberLazyGridState()
 ) {
     val context = LocalContext.current
-    val hasPermission = PermissionState.hasImagesPermission(context)
-
-    if (!hasPermission) {
+    if (!PermissionState.hasImagesPermission(context)) {
         InlinePermissionRequest(permissionType = "image", onGranted = onRefresh)
         return
     }
 
     if (isLoading && images.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                CircularProgressIndicator()
-                Text("Loading local images...", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
+        PhotoLoadingState()
         return
     }
-
     if (loadError != null && images.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(24.dp)
-            ) {
-                Text(
-                    text = "Failed to load images",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-                Text(
-                    text = loadError,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
-                }
-            }
-        }
+        PhotoErrorState(message = loadError, onRetry = onRefresh)
         return
     }
 
-    if (images.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+    val configuration = LocalConfiguration.current
+    val columns = (GalleryLayout.columnsForWidth(
+        configuration.screenWidthDp,
+        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    ) + 1).coerceAtMost(6)
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            state = gridState,
+            contentPadding = PaddingValues(start = 8.dp, top = 10.dp, end = 8.dp, bottom = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "No local images found",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = "Add images to your device and refresh",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Refresh")
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
+                    Text("图片", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        text = "${images.size} 张本地图片",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-        }
-    } else {
-        val configuration = LocalConfiguration.current
-        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val screenWidth = configuration.screenWidthDp
-
-        val columns = when {
-            screenWidth >= 600 -> if (isLandscape) 6 else 4
-            else -> if (isLandscape) 3 else 2
-        }
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize().weight(1f)
-            ) {
-                items(
-                    items = images,
-                    key = { it.contentUri }
-                ) { image ->
-                    ImageCard(
-                        image = image,
-                        onClick = { onImageClick(image, images) }
-                    )
+            if (images.isEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    PhotoEmptyState(onRefresh)
+                }
+            } else {
+                items(images, key = { it.contentUri }, contentType = { "photo-tile" }) { image ->
+                    ImageCard(image = image, onClick = { onImageClick(image, images) })
                 }
             }
         }
@@ -147,61 +105,71 @@ fun ImageGridScreen(
 }
 
 @Composable
-fun ImageCard(
-    image: LocalMediaItem,
-    onClick: () -> Unit
-) {
-    Card(
+fun ImageCard(image: LocalMediaItem, onClick: () -> Unit) {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick)
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.2f)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-            ) {
-                MediaThumbnail(
-                    contentUri = image.contentUri,
-                    mediaType = if (image.isGif) MediaType.GIF else MediaType.IMAGE,
-                    modifier = Modifier.fillMaxSize(),
-                    width = 256,
-                    height = 256
-                )
-
-                if (image.isGif) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                    ) {
-                        Text(
-                            text = "GIF",
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+        MediaThumbnail(
+            contentUri = image.contentUri,
+            mediaType = if (image.isGif) MediaType.GIF else MediaType.IMAGE,
+            modifier = Modifier.fillMaxSize(),
+            width = 256,
+            height = 256
+        )
+        if (image.isGif) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.68f),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
             ) {
                 Text(
-                    text = image.displayName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    "GIF",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PhotoLoadingState() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator()
+            Text("正在整理图片…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun PhotoErrorState(message: String, onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("图片暂时无法读取", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
+            Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onRetry) {
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("重试")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoEmptyState(onRefresh: () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(42.dp), tint = MaterialTheme.colorScheme.primary)
+            Text("还没有找到图片", style = MaterialTheme.typography.titleMedium)
+            Text("图片会显示在独立入口中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = onRefresh) { Text("重新扫描") }
         }
     }
 }

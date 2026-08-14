@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,7 +34,8 @@ fun FolderScreen(
     loadError: String?,
     sortMode: FolderSortMode,
     onSortModeChange: (FolderSortMode) -> Unit,
-    videos: List<LocalMediaItem>
+    videos: List<LocalMediaItem>,
+    gridState: LazyGridState = rememberLazyGridState()
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -42,8 +45,8 @@ fun FolderScreen(
         return
     }
 
-    val sortedFolders = remember(folders, sortMode, videos) {
-        FolderSort.sort(folders, sortMode, videos)
+    val sortedFolders by remember(folders, videos, sortMode) {
+        derivedStateOf { FolderSort.sort(folders, sortMode, videos) }
     }
 
     if (isLoading && folders.isEmpty()) {
@@ -56,7 +59,7 @@ fun FolderScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 CircularProgressIndicator()
-                Text("Loading local folders...", style = MaterialTheme.typography.bodyMedium)
+                Text("正在整理文件夹…", style = MaterialTheme.typography.bodyMedium)
             }
         }
         return
@@ -73,7 +76,7 @@ fun FolderScreen(
                 modifier = Modifier.padding(24.dp)
             ) {
                 Text(
-                    text = "Failed to load folders",
+                    text = "文件夹暂时无法读取",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -85,9 +88,9 @@ fun FolderScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Retry")
+                    Icon(Icons.Default.Refresh, contentDescription = "重试")
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
+                    Text("重试")
                 }
             }
         }
@@ -104,19 +107,19 @@ fun FolderScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "No folders found",
+                    text = "还没有找到文件夹",
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "Add videos in subdirectories and refresh",
+                    text = "包含视频的目录会自动显示在这里",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    Icon(Icons.Default.Refresh, contentDescription = "重新扫描")
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Refresh")
+                    Text("重新扫描")
                 }
             }
         }
@@ -125,10 +128,7 @@ fun FolderScreen(
         val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val screenWidth = configuration.screenWidthDp
 
-        val columns = when {
-            screenWidth >= 600 -> if (isLandscape) 6 else 4
-            else -> if (isLandscape) 3 else 2
-        }
+        val columns = GalleryLayout.columnsForWidth(screenWidth, isLandscape).coerceAtMost(5)
 
         Column(modifier = Modifier.fillMaxSize()) {
             if (isLoading) {
@@ -144,8 +144,8 @@ fun FolderScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Folders (${sortedFolders.size})",
-                    style = MaterialTheme.typography.titleMedium
+                    text = "文件夹",
+                    style = MaterialTheme.typography.headlineMedium
                 )
                 
                 Box {
@@ -154,10 +154,10 @@ fun FolderScreen(
                         Icon(Icons.Default.Sort, contentDescription = "Sort")
                         Spacer(modifier = Modifier.width(4.dp))
                         val label = when (sortMode) {
-                            FolderSortMode.NAME_ASC -> "Name A-Z"
-                            FolderSortMode.VIDEO_COUNT_DESC -> "Video Count"
-                            FolderSortMode.TOTAL_SIZE_DESC -> "Total Size"
-                            FolderSortMode.DATE_MODIFIED_DESC -> "Recent Modified"
+                            FolderSortMode.NAME_ASC -> "名称"
+                            FolderSortMode.VIDEO_COUNT_DESC -> "视频数量"
+                            FolderSortMode.TOTAL_SIZE_DESC -> "占用空间"
+                            FolderSortMode.DATE_MODIFIED_DESC -> "最近更新"
                         }
                         Text(label)
                     }
@@ -166,28 +166,28 @@ fun FolderScreen(
                         onDismissRequest = { sortExpanded = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Name A-Z") },
+                            text = { Text("名称 A–Z") },
                             onClick = {
                                 onSortModeChange(FolderSortMode.NAME_ASC)
                                 sortExpanded = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Video Count") },
+                            text = { Text("视频数量") },
                             onClick = {
                                 onSortModeChange(FolderSortMode.VIDEO_COUNT_DESC)
                                 sortExpanded = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Total Size") },
+                            text = { Text("占用空间") },
                             onClick = {
                                 onSortModeChange(FolderSortMode.TOTAL_SIZE_DESC)
                                 sortExpanded = false
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Recent Modified") },
+                            text = { Text("最近更新") },
                             onClick = {
                                 onSortModeChange(FolderSortMode.DATE_MODIFIED_DESC)
                                 sortExpanded = false
@@ -199,6 +199,7 @@ fun FolderScreen(
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
+                state = gridState,
                 contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -208,7 +209,8 @@ fun FolderScreen(
             ) {
                 items(
                     items = sortedFolders,
-                    key = { it.relativePath }
+                    key = { "${it.volumeName}:${it.relativePath}" },
+                    contentType = { "folder-card" }
                 ) { folder ->
                     FolderCard(
                         folder = folder,
@@ -229,8 +231,8 @@ fun FolderCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column {
             Box(
@@ -272,7 +274,7 @@ fun FolderCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "${folder.videoCount} videos",
+                    text = "${folder.videoCount} 个视频",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )

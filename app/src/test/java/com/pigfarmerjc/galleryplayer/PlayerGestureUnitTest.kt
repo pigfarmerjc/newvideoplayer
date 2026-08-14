@@ -119,4 +119,34 @@ class PlayerGestureUnitTest {
         )
         assertEquals(PlayerDragAction.None, action)
     }
+
+    @Test
+    fun quickShortFlickCanMoveToNextVideo() {
+        val action = PlayerGestureState.determineAction(
+            dragOffsetX = -90f,
+            dragOffsetY = 8f,
+            horizontalThresholdPx = horizontalThreshold,
+            verticalThresholdPx = verticalThreshold,
+            currentIndex = 1,
+            lastIndex = 3,
+            velocityX = -1800f,
+            velocityY = 80f
+        )
+        assertEquals(PlayerDragAction.Next, action)
+    }
+
+    @Test
+    fun upwardFlickNeverDismissesPlayer() {
+        val action = PlayerGestureState.determineAction(
+            dragOffsetX = 5f,
+            dragOffsetY = -120f,
+            horizontalThresholdPx = horizontalThreshold,
+            verticalThresholdPx = verticalThreshold,
+            currentIndex = 1,
+            lastIndex = 3,
+            velocityX = 0f,
+            velocityY = -2200f
+        )
+        assertEquals(PlayerDragAction.None, action)
+    }
 }

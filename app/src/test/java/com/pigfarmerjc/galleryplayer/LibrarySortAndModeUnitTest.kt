@@ -134,4 +134,52 @@ class LibrarySortAndModeUnitTest {
         }
         assertEquals(PlaybackRepeatMode.NONE, mode)
     }
+
+    @Test
+    fun folderDateSortDoesNotMixSamePathAcrossStorageVolumes() {
+        val externalVideo = videos[0].copy(
+            volumeName = "external",
+            relativePath = "Movies/",
+            dateModifiedEpochSeconds = 100L
+        )
+        val cardVideo = videos[1].copy(
+            volumeName = "1234-ABCD",
+            relativePath = "Movies/",
+            dateModifiedEpochSeconds = 200L
+        )
+        val folders = listOf(
+            FolderItem("external", "Movies/", "Movies", 1, externalVideo.contentUri, externalVideo.fileSize),
+            FolderItem("1234-ABCD", "Movies/", "Movies", 1, cardVideo.contentUri, cardVideo.fileSize)
+        )
+
+        val sorted = FolderSort.sort(
+            folders,
+            FolderSortMode.DATE_MODIFIED_DESC,
+            listOf(externalVideo, cardVideo)
+        )
+
+        assertEquals("1234-ABCD", sorted.first().volumeName)
+    }
+
+    @Test
+    fun folderContentsDoNotMixSamePathAcrossStorageVolumes() {
+        val internalVideo = videos[0].copy(
+            contentUri = "content://media/internal",
+            volumeName = "external_primary",
+            relativePath = "Movies/"
+        )
+        val cardVideo = videos[1].copy(
+            contentUri = "content://media/card",
+            volumeName = "1234-ABCD",
+            relativePath = "Movies/"
+        )
+
+        val result = FolderSort.videosInFolder(
+            videos = listOf(internalVideo, cardVideo),
+            volumeName = "1234-ABCD",
+            relativePath = "Movies/"
+        )
+
+        assertEquals(listOf(cardVideo), result)
+    }
 }

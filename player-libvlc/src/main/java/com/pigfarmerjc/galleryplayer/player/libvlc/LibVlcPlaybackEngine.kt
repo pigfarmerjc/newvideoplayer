@@ -48,6 +48,12 @@ open class LibVlcPlaybackEngine protected constructor(
     private val _diagnostics = MutableStateFlow(PlaybackDiagnostics())
     override val diagnostics: StateFlow<PlaybackDiagnostics> = _diagnostics.asStateFlow()
 
+    private val _audioTracks = MutableStateFlow<List<PlaybackTrack>>(emptyList())
+    override val audioTracks: StateFlow<List<PlaybackTrack>> = _audioTracks.asStateFlow()
+
+    private val _subtitleTracks = MutableStateFlow<List<PlaybackTrack>>(emptyList())
+    override val subtitleTracks: StateFlow<List<PlaybackTrack>> = _subtitleTracks.asStateFlow()
+
     private var libVlc: LibVLC? = null
     private var mediaPlayer: MediaPlayer? = null
     private var currentMedia: Media? = null
@@ -85,6 +91,11 @@ open class LibVlcPlaybackEngine protected constructor(
     }
 
     private fun handleVlcEvent(event: MediaPlayer.Event) {
+        if (_playbackState.value == PlaybackState.Released) return
+        if (_playbackState.value == PlaybackState.Error && event.type != MediaPlayer.Event.Opening) {
+            return
+        }
+
         val eventName = when (event.type) {
             MediaPlayer.Event.Opening -> {
                 _playbackState.value = PlaybackState.Opening
@@ -104,7 +115,9 @@ open class LibVlcPlaybackEngine protected constructor(
                 "Paused"
             }
             MediaPlayer.Event.Stopped -> {
-                _playbackState.value = PlaybackState.Stopped
+                if (_playbackState.value != PlaybackState.Error && _playbackState.value != PlaybackState.Released) {
+                    _playbackState.value = PlaybackState.Stopped
+                }
                 "Stopped"
             }
             MediaPlayer.Event.EndReached -> {
@@ -123,15 +136,15 @@ open class LibVlcPlaybackEngine protected constructor(
                             lastError = "Async DIRECT_URI failed. Retrying with FILE_DESCRIPTOR.",
                             playbackStrategy = "FILE_DESCRIPTOR"
                         )
-                        closeCurrentSource()
+                        closeCurrentSource(resetStateToIdle = false)
                         currentUri = uri
                         tryToLoadMedia(uri, SourceStrategy.FILE_DESCRIPTOR)
                         return
                     }
                 }
-                _playbackState.value = PlaybackState.Error
                 updateDiagnostics(lastError = "VLC player error encountered")
-                closeCurrentSource()
+                closeCurrentSource(resetStateToIdle = false)
+                _playbackState.value = PlaybackState.Error
                 "EncounteredError"
             }
             MediaPlayer.Event.TimeChanged -> {
@@ -154,6 +167,12 @@ open class LibVlcPlaybackEngine protected constructor(
             MediaPlayer.Event.Vout -> {
                 updateVideoSize()
                 "Vout"
+            }
+            MediaPlayer.Event.ESAdded,
+            MediaPlayer.Event.ESDeleted,
+            MediaPlayer.Event.ESSelected -> {
+                updateTrackOptions()
+                "TracksChanged"
             }
             else -> "Event-${event.type}"
         }
@@ -247,6 +266,19 @@ open class LibVlcPlaybackEngine protected constructor(
             sampleRate = sampleRate,
             channels = channels
         )
+        updateTrackOptions()
+    }
+
+    private fun updateTrackOptions() {
+        val player = mediaPlayer ?: return
+        val selectedAudio = player.audioTrack
+        val selectedSubtitle = player.spuTrack
+        _audioTracks.value = player.audioTracks
+            ?.map { PlaybackTrack(it.id, it.name.orEmpty().ifBlank { "音轨 ${it.id}" }, it.id == selectedAudio) }
+            .orEmpty()
+        _subtitleTracks.value = player.spuTracks
+            ?.map { PlaybackTrack(it.id, it.name.orEmpty().ifBlank { "字幕 ${it.id}" }, it.id == selectedSubtitle) }
+            .orEmpty()
     }
 
     private fun updateVideoSize() {
@@ -306,7 +338,7 @@ open class LibVlcPlaybackEngine protected constructor(
         )
     }
 
-    private fun closeCurrentSource() {
+    private fun closeCurrentSource(resetStateToIdle: Boolean = true) {
         if (isClosingSource) return
         isClosingSource = true
         try {
@@ -316,15 +348,20 @@ open class LibVlcPlaybackEngine protected constructor(
             currentMedia = null
             releaseFileDescriptor()
             currentUri = null
-            _playbackState.value = PlaybackState.Idle
+            if (resetStateToIdle && _playbackState.value != PlaybackState.Error && _playbackState.value != PlaybackState.Released) {
+                _playbackState.value = PlaybackState.Idle
+            }
             _videoSize.value = null
+            _audioTracks.value = emptyList()
+            _subtitleTracks.value = emptyList()
         } finally {
             isClosingSource = false
         }
     }
 
     override suspend fun open(uri: Uri) {
-        closeCurrentSource()
+        closeCurrentSource(resetStateToIdle = false)
+        _playbackState.value = PlaybackState.Opening
         currentUri = uri
         _positionMs.value = 0L
         _durationMs.value = 0L
@@ -366,13 +403,13 @@ open class LibVlcPlaybackEngine protected constructor(
             if (strategy == SourceStrategy.DIRECT_URI && !hasRetriedForCurrentUri) {
                 hasRetriedForCurrentUri = true
                 updateDiagnostics(lastError = "Direct URI failed: ${e.localizedMessage}. Retrying with FD.")
-                closeCurrentSource()
+                closeCurrentSource(resetStateToIdle = false)
                 currentUri = uri
                 tryToLoadMedia(uri, SourceStrategy.FILE_DESCRIPTOR)
             } else {
-                _playbackState.value = PlaybackState.Error
                 updateDiagnostics(lastError = "Failed to open media: ${e.localizedMessage}")
-                closeCurrentSource()
+                closeCurrentSource(resetStateToIdle = false)
+                _playbackState.value = PlaybackState.Error
             }
         }
     }
@@ -403,7 +440,7 @@ open class LibVlcPlaybackEngine protected constructor(
     }
 
     override fun stop() {
-        closeCurrentSource()
+        closeCurrentSource(resetStateToIdle = false)
         _playbackState.value = PlaybackState.Stopped
     }
 
@@ -454,6 +491,18 @@ open class LibVlcPlaybackEngine protected constructor(
                 }
             }
         }
+    }
+
+    override fun selectAudioTrack(trackId: Int): Boolean {
+        val selected = mediaPlayer?.setAudioTrack(trackId) ?: false
+        if (selected) updateTrackOptions()
+        return selected
+    }
+
+    override fun selectSubtitleTrack(trackId: Int): Boolean {
+        val selected = mediaPlayer?.setSpuTrack(trackId) ?: false
+        if (selected) updateTrackOptions()
+        return selected
     }
 
     override fun attachVideoOutput(output: VideoOutputHost) {

@@ -22,15 +22,20 @@ object PlayerGestureState {
         horizontalThresholdPx: Float,
         verticalThresholdPx: Float,
         currentIndex: Int,
-        lastIndex: Int
+        lastIndex: Int,
+        velocityX: Float = 0f,
+        velocityY: Float = 0f
     ): PlayerDragAction {
         val absX = abs(dragOffsetX)
         val absY = abs(dragOffsetY)
+        val horizontalFlick = abs(velocityX) >= 1_400f && absX >= horizontalThresholdPx * 0.2f
+        val downwardFlick = velocityY >= 1_600f && dragOffsetY >= verticalThresholdPx * 0.2f
 
         // Horizontal dominant
-        if (absX > absY) {
-            if (absX > horizontalThresholdPx) {
-                return if (dragOffsetX > 0f) {
+        if (absX > absY || abs(velocityX) > abs(velocityY)) {
+            if (absX > horizontalThresholdPx || horizontalFlick) {
+                val movesRight = if (horizontalFlick) velocityX > 0f else dragOffsetX > 0f
+                return if (movesRight) {
                     if (currentIndex > 0) PlayerDragAction.Previous else PlayerDragAction.None
                 } else {
                     if (currentIndex < lastIndex) PlayerDragAction.Next else PlayerDragAction.None
@@ -38,7 +43,7 @@ object PlayerGestureState {
             }
         } else {
             // Vertical dominant and downwards swipe
-            if (dragOffsetY > 0f && absY > verticalThresholdPx) {
+            if (dragOffsetY > 0f && (absY > verticalThresholdPx || downwardFlick)) {
                 return PlayerDragAction.Dismiss
             }
         }

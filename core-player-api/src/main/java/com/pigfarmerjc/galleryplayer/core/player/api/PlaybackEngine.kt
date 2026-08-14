@@ -13,6 +13,8 @@ interface PlaybackEngine {
     val playbackSpeed: StateFlow<Float>
     val videoSize: StateFlow<VideoSize?>
     val diagnostics: StateFlow<PlaybackDiagnostics>
+    val audioTracks: StateFlow<List<PlaybackTrack>>
+    val subtitleTracks: StateFlow<List<PlaybackTrack>>
 
     suspend fun open(uri: Uri)
     fun play()
@@ -22,6 +24,8 @@ interface PlaybackEngine {
     fun setSpeed(speed: Float)
     fun setRepeatMode(mode: RepeatMode)
     fun setDecoderMode(mode: DecoderMode)
+    fun selectAudioTrack(trackId: Int): Boolean
+    fun selectSubtitleTrack(trackId: Int): Boolean
     fun attachVideoOutput(output: VideoOutputHost)
     fun detachVideoOutput()
     fun release()
@@ -63,6 +67,12 @@ enum class DecoderMode {
 data class VideoSize(
     val width: Int,
     val height: Int
+)
+
+data class PlaybackTrack(
+    val id: Int,
+    val name: String,
+    val selected: Boolean
 )
 
 data class PlaybackDiagnostics(

@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
@@ -42,6 +43,7 @@ fun ImageViewerScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .height(56.dp)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
                 .padding(horizontal = 8.dp),
@@ -75,7 +77,9 @@ fun ImageViewerScreen(
                 MediaThumbnail(
                     contentUri = image.contentUri,
                     mediaType = image.mediaType,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    maxDecodeDimension = 2_048,
+                    contentScale = ContentScale.Fit
                 )
 
                 // If the image is a GIF, display the custom notice
@@ -88,7 +92,7 @@ fun ImageViewerScreen(
                             .padding(bottom = 24.dp)
                     ) {
                         Text(
-                            text = "GIF playback TODO",
+                            text = "GIF 将显示静态预览",
                             color = Color.White,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

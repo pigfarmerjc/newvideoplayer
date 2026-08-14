@@ -1,10 +1,23 @@
 package com.pigfarmerjc.galleryplayer
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
@@ -28,8 +41,6 @@ fun HomeScreen(
     skipSeconds: Int,
     onDefaultSpeedChange: (Float) -> Unit,
     onSkipSecondsChange: (Int) -> Unit,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
     videoSortMode: VideoSortMode,
     onVideoSortModeChange: (VideoSortMode) -> Unit,
     folderSortMode: FolderSortMode,
@@ -46,107 +57,102 @@ fun HomeScreen(
     onAddSafFolder: (String) -> Unit,
     onRemoveSafFolder: (String) -> Unit
 ) {
-    var activeTab by remember { mutableStateOf(HomeTab.VIDEOS) }
+    var activeTab by rememberSaveable { mutableStateOf(HomeTab.VIDEOS) }
+    val videoGridState = rememberLazyGridState()
+    val folderGridState = rememberLazyGridState()
+    val imageGridState = rememberLazyGridState()
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(
-                modifier = Modifier.fillMaxWidth()
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 10.dp
             ) {
-                NavigationBarItem(
-                    selected = activeTab == HomeTab.VIDEOS,
-                    onClick = { activeTab = HomeTab.VIDEOS },
-                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Videos") },
-                    label = { Text("Videos") }
-                )
-                NavigationBarItem(
-                    selected = activeTab == HomeTab.FOLDERS,
-                    onClick = { activeTab = HomeTab.FOLDERS },
-                    icon = { Icon(Icons.Default.Menu, contentDescription = "Folders") },
-                    label = { Text("Folders") }
-                )
-                NavigationBarItem(
-                    selected = activeTab == HomeTab.IMAGES,
-                    onClick = { activeTab = HomeTab.IMAGES },
-                    icon = { Icon(Icons.Default.Face, contentDescription = "Images") },
-                    label = { Text("Images") }
-                )
-                NavigationBarItem(
-                    selected = activeTab == HomeTab.SETTINGS,
-                    onClick = { activeTab = HomeTab.SETTINGS },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                    label = { Text("Settings") }
-                )
+                GalleryNavItem(HomeTab.VIDEOS, activeTab, "视频", Icons.Filled.PlayArrow) { activeTab = it }
+                GalleryNavItem(HomeTab.FOLDERS, activeTab, "文件夹", Icons.Filled.Folder) { activeTab = it }
+                GalleryNavItem(HomeTab.IMAGES, activeTab, "图片", Icons.Filled.Image) { activeTab = it }
+                GalleryNavItem(HomeTab.SETTINGS, activeTab, "设置", Icons.Filled.Settings) { activeTab = it }
             }
         }
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .padding(innerPadding)
         ) {
             when (activeTab) {
-                HomeTab.VIDEOS -> {
-                    VideoGridScreen(
-                        videos = videos,
-                        onVideoClick = onVideoClick,
-                        onRefresh = onReload,
-                        isLoading = isLoadingMedia,
-                        loadError = mediaLoadError,
-                        playbackProgressMap = playbackProgressMap,
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = onSearchQueryChange,
-                        sortMode = videoSortMode,
-                        onSortModeChange = onVideoSortModeChange,
-                        continueWatchingVideos = continueWatchingVideos
-                    )
-                }
-                HomeTab.FOLDERS -> {
-                    FolderScreen(
-                        folders = folders,
-                        onFolderClick = onFolderClick,
-                        onRefresh = onReload,
-                        isLoading = isLoadingMedia,
-                        loadError = mediaLoadError,
-                        sortMode = folderSortMode,
-                        onSortModeChange = onFolderSortModeChange,
-                        videos = videos
-                    )
-                }
-                HomeTab.IMAGES -> {
-                    ImageGridScreen(
-                        images = images,
-                        onImageClick = onImageClick,
-                        onRefresh = onReload,
-                        isLoading = isLoadingMedia,
-                        loadError = mediaLoadError
-                    )
-                }
-                HomeTab.SETTINGS -> {
-                    SettingsScreen(
-                        onReload = onReload,
-                        mediaRepositoryCount = mediaRepositoryCount,
-                        playbackEngine = playbackEngine,
-                        defaultSpeed = defaultSpeed,
-                        skipSeconds = skipSeconds,
-                        onDefaultSpeedChange = onDefaultSpeedChange,
-                        onSkipSecondsChange = onSkipSecondsChange,
-                        lastRefreshDurationMs = lastRefreshDurationMs,
-                        mediaStoreVolumes = mediaStoreVolumes,
-                        safAuthorizedFolders = safAuthorizedFolders,
-                        lastPlayedUri = lastPlayedUri,
-                        lastPlayedTitle = lastPlayedTitle,
-                        lastPlayedSize = lastPlayedSize,
-                        decoderModeState = decoderModeState,
-                        onDecoderModeChange = onDecoderModeChange,
-                        onAddSafFolder = onAddSafFolder,
-                        onRemoveSafFolder = onRemoveSafFolder,
-                        videosCount = videos.size,
-                        imagesCount = images.size,
-                        foldersCount = folders.size
-                    )
-                }
+                HomeTab.VIDEOS -> VideoGridScreen(
+                    videos = videos,
+                    onVideoClick = onVideoClick,
+                    onRefresh = onReload,
+                    isLoading = isLoadingMedia,
+                    loadError = mediaLoadError,
+                    playbackProgressMap = playbackProgressMap,
+                    sortMode = videoSortMode,
+                    onSortModeChange = onVideoSortModeChange,
+                    continueWatchingVideos = continueWatchingVideos,
+                    gridState = videoGridState
+                )
+                HomeTab.FOLDERS -> FolderScreen(
+                    folders = folders,
+                    onFolderClick = onFolderClick,
+                    onRefresh = onReload,
+                    isLoading = isLoadingMedia,
+                    loadError = mediaLoadError,
+                    sortMode = folderSortMode,
+                    onSortModeChange = onFolderSortModeChange,
+                    videos = videos,
+                    gridState = folderGridState
+                )
+                HomeTab.IMAGES -> ImageGridScreen(
+                    images = images,
+                    onImageClick = onImageClick,
+                    onRefresh = onReload,
+                    isLoading = isLoadingMedia,
+                    loadError = mediaLoadError,
+                    gridState = imageGridState
+                )
+                HomeTab.SETTINGS -> SettingsScreen(
+                    onReload = onReload,
+                    mediaRepositoryCount = mediaRepositoryCount,
+                    playbackEngine = playbackEngine,
+                    defaultSpeed = defaultSpeed,
+                    skipSeconds = skipSeconds,
+                    onDefaultSpeedChange = onDefaultSpeedChange,
+                    onSkipSecondsChange = onSkipSecondsChange,
+                    lastRefreshDurationMs = lastRefreshDurationMs,
+                    mediaStoreVolumes = mediaStoreVolumes,
+                    safAuthorizedFolders = safAuthorizedFolders,
+                    lastPlayedUri = lastPlayedUri,
+                    lastPlayedTitle = lastPlayedTitle,
+                    lastPlayedSize = lastPlayedSize,
+                    decoderModeState = decoderModeState,
+                    onDecoderModeChange = onDecoderModeChange,
+                    onAddSafFolder = onAddSafFolder,
+                    onRemoveSafFolder = onRemoveSafFolder,
+                    videosCount = videos.size,
+                    imagesCount = images.size,
+                    foldersCount = folders.size
+                )
             }
         }
     }
+}
+
+@Composable
+private fun RowScope.GalleryNavItem(
+    tab: HomeTab,
+    activeTab: HomeTab,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onSelect: (HomeTab) -> Unit
+) {
+    NavigationBarItem(
+        selected = tab == activeTab,
+        onClick = { onSelect(tab) },
+        icon = { Icon(icon, contentDescription = label) },
+        label = { Text(label) }
+    )
 }

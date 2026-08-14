@@ -47,6 +47,14 @@ object VideoFilterAndSort {
 }
 
 object FolderSort {
+    fun videosInFolder(
+        videos: List<LocalMediaItem>,
+        volumeName: String,
+        relativePath: String
+    ): List<LocalMediaItem> = videos.filter { video ->
+        video.volumeName == volumeName && video.relativePath == relativePath
+    }
+
     fun sort(
         folders: List<FolderItem>,
         sortMode: FolderSortMode,
@@ -57,9 +65,16 @@ object FolderSort {
             FolderSortMode.VIDEO_COUNT_DESC -> folders.sortedByDescending { it.videoCount }
             FolderSortMode.TOTAL_SIZE_DESC -> folders.sortedByDescending { it.totalSize }
             FolderSortMode.DATE_MODIFIED_DESC -> {
+                val newestByFolder = HashMap<Pair<String, String>, Long>(folders.size)
+                videos.forEach { video ->
+                    val key = video.volumeName to video.relativePath
+                    val modified = video.dateModifiedEpochSeconds ?: 0L
+                    if (modified > (newestByFolder[key] ?: Long.MIN_VALUE)) {
+                        newestByFolder[key] = modified
+                    }
+                }
                 folders.sortedByDescending { folder ->
-                    videos.filter { it.relativePath == folder.relativePath }
-                        .maxOfOrNull { it.dateModifiedEpochSeconds ?: 0L } ?: 0L
+                    newestByFolder[folder.volumeName to folder.relativePath] ?: 0L
                 }
             }
         }

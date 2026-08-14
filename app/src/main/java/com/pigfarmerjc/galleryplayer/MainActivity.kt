@@ -36,6 +36,7 @@ import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcPlaybackEngine
 import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,6 +67,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var lastPlayedTitle by mutableStateOf("")
     var lastPlayedSize by mutableStateOf(0L)
     var decoderModeState by mutableStateOf(DecoderMode.AUTO)
+    private var mediaRefreshJob: Job? = null
+    private var mediaRefreshGeneration = 0L
 
     // DB Repositories
     private val database by lazy { GalleryDatabase.getDatabase(application) }
@@ -81,7 +84,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var skipSeconds by mutableStateOf(10)
 
     // Library search & sort states
-    var searchQuery by mutableStateOf("")
     var videoSortMode by mutableStateOf(VideoSortMode.DATE_MODIFIED_DESC)
     var folderSortMode by mutableStateOf(FolderSortMode.VIDEO_COUNT_DESC)
     var repeatModeState by mutableStateOf(PlaybackRepeatMode.NONE)
@@ -89,13 +91,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val historyListState = mutableStateOf<List<com.pigfarmerjc.galleryplayer.core.database.repository.PlaybackHistoryItem>>(emptyList())
 
     val continueWatchingList = derivedStateOf {
-        val activeUris = playbackProgressMap.value.keys
+        val videosByUri = videosList.associateBy(LocalMediaItem::contentUri)
         historyListState.value
-            .filter { it.contentUri in activeUris && !it.finished }
-            .mapNotNull { historyItem ->
-                videosList.find { it.contentUri == historyItem.contentUri }
-            }
-            .take(10)
+            .asSequence()
+            .filter { it.contentUri.isNotBlank() && !it.finished && it.durationMs > 0L }
+            .filter { (it.playbackPositionMs.toDouble() / it.durationMs.toDouble()) in 0.01..0.90 }
+            .sortedByDescending { it.lastPlayedTime }
+            .mapNotNull { videosByUri[it.contentUri] }
+            .take(6)
+            .toList()
     }
 
     init {
@@ -246,7 +250,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshLocalMedia(context: android.content.Context) {
-        viewModelScope.launch {
+        val generation = ++mediaRefreshGeneration
+        mediaRefreshJob?.cancel()
+        mediaRefreshJob = viewModelScope.launch {
             if (!PermissionState.hasAnyStoragePermission(context)) {
                 permissionsGranted = false
                 return@launch
@@ -257,78 +263,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val startTime = System.currentTimeMillis()
-
-                // Query all external volumes
-                val volumes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    try {
-                        MediaStore.getExternalVolumeNames(context).toList()
-                    } catch (e: Exception) {
+                val authorizedSafFolders = safAuthorizedFolders.toList()
+                val snapshot = withContext(Dispatchers.IO) {
+                    val volumes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        runCatching { MediaStore.getExternalVolumeNames(context).toList() }
+                            .getOrDefault(listOf("external"))
+                    } else {
                         listOf("external")
                     }
-                } else {
-                    listOf("external")
+
+                    val videos = buildList {
+                        volumes.forEach { volume ->
+                            runCatching {
+                                addAll(
+                                    MediaStoreHelper.queryVideosForUri(
+                                        context,
+                                        MediaStore.Video.Media.getContentUri(volume),
+                                        volume
+                                    )
+                                )
+                            }
+                        }
+                        authorizedSafFolders.forEach { safUri ->
+                            runCatching { addAll(MediaStoreHelper.querySafVideos(context, safUri)) }
+                        }
+                    }
+                    val images = buildList {
+                        volumes.forEach { volume ->
+                            runCatching {
+                                addAll(
+                                    MediaStoreHelper.queryImagesForUri(
+                                        context,
+                                        MediaStore.Images.Media.getContentUri(volume),
+                                        volume
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    val folders = videos
+                        .groupBy { it.volumeName to it.relativePath }
+                        .map { (key, items) ->
+                            val path = key.second
+                            val folderName = path.trimEnd('/').substringAfterLast('/').ifBlank { "根目录" }
+                            FolderItem(
+                                volumeName = key.first,
+                                relativePath = path,
+                                displayName = folderName,
+                                videoCount = items.size,
+                                coverUri = items.maxByOrNull { it.dateModifiedEpochSeconds ?: 0L }?.contentUri,
+                                totalSize = items.sumOf { it.fileSize }
+                            )
+                        }
+                    Triple(volumes, videos, images) to folders
                 }
+                val (mediaData, folderData) = snapshot
+                if (generation != mediaRefreshGeneration) return@launch
+                val (volumes, v, img) = mediaData
                 mediaStoreVolumes = volumes
-
-                val v = mutableListOf<LocalMediaItem>()
-                for (volume in volumes) {
-                    try {
-                        val uri = MediaStore.Video.Media.getContentUri(volume)
-                        v.addAll(MediaStoreHelper.queryVideosForUri(context, uri, volume))
-                    } catch (e: Exception) {
-                        // ignore
-                    }
-                }
-
-                val img = mutableListOf<LocalMediaItem>()
-                for (volume in volumes) {
-                    try {
-                        val uri = MediaStore.Images.Media.getContentUri(volume)
-                        img.addAll(MediaStoreHelper.queryImagesForUri(context, uri, volume))
-                    } catch (e: Exception) {
-                        // ignore
-                    }
-                }
-
-                // Query SAF directories
-                for (safUriString in safAuthorizedFolders) {
-                    try {
-                        v.addAll(MediaStoreHelper.querySafVideos(context, safUriString))
-                    } catch (e: Exception) {
-                        // ignore
-                    }
-                }
-
                 videosList.clear()
                 videosList.addAll(v)
-
                 imagesList.clear()
                 imagesList.addAll(img)
-
-                // Recompute folders aggregate
-                val f = v.groupBy { it.relativePath }.map { (path, items) ->
-                    val folderName = path.trimEnd('/').split('/').lastOrNull()?.takeIf { it.isNotEmpty() } ?: "Root"
-                    FolderItem(
-                        volumeName = items.firstOrNull()?.volumeName ?: "external",
-                        relativePath = path,
-                        displayName = folderName,
-                        videoCount = items.size,
-                        coverUri = items.firstOrNull()?.contentUri,
-                        totalSize = items.sumOf { it.fileSize }
-                    )
-                }
                 foldersList.clear()
-                foldersList.addAll(f)
+                foldersList.addAll(folderData)
 
                 mediaRepositoryCount = v.size + img.size
                 lastRefreshDurationMs = System.currentTimeMillis() - startTime
 
-                android.widget.Toast.makeText(context, "媒体库已刷新", android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
+                if (generation != mediaRefreshGeneration) return@launch
                 mediaLoadError = e.localizedMessage ?: "Failed to read storage"
                 android.widget.Toast.makeText(context, "刷新失败: ${e.localizedMessage}", android.widget.Toast.LENGTH_LONG).show()
             } finally {
-                isLoadingMedia = false
+                if (generation == mediaRefreshGeneration) isLoadingMedia = false
             }
         }
     }
@@ -361,6 +369,10 @@ class MainActivity : ComponentActivity() {
                         viewModel.wasPlayingBeforeBackground = (viewModel.playbackEngine.playbackState.value == PlaybackState.Playing)
                         viewModel.playbackEngine.pause()
                     } else if (event == Lifecycle.Event.ON_RESUME) {
+                        val currentlyGranted = PermissionState.hasAnyStoragePermission(context)
+                        if (currentlyGranted != viewModel.permissionsGranted) {
+                            viewModel.refreshLocalMedia(context)
+                        }
                         if (viewModel.wasPlayingBeforeBackground) {
                             viewModel.playbackEngine.play()
                             viewModel.wasPlayingBeforeBackground = false
@@ -373,7 +385,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MaterialTheme {
+            GalleryPlayerTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -436,8 +448,6 @@ class MainActivity : ComponentActivity() {
                                     skipSeconds = viewModel.skipSeconds,
                                     onDefaultSpeedChange = { viewModel.updateDefaultSpeed(it) },
                                     onSkipSecondsChange = { viewModel.updateSkipSeconds(it) },
-                                    searchQuery = viewModel.searchQuery,
-                                    onSearchQueryChange = { viewModel.searchQuery = it },
                                     videoSortMode = viewModel.videoSortMode,
                                     onVideoSortModeChange = { viewModel.updateVideoSortMode(it) },
                                     folderSortMode = viewModel.folderSortMode,
@@ -456,7 +466,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                             is Screen.FolderVideos -> {
-                                val folderVideos = viewModel.videosList.filter { it.relativePath == currentScreen.relativePath }
+                                val folderVideos = FolderSort.videosInFolder(
+                                    videos = viewModel.videosList,
+                                    volumeName = currentScreen.volumeName,
+                                    relativePath = currentScreen.relativePath
+                                )
                                 Column(modifier = Modifier.fillMaxSize()) {
                                     Row(
                                         modifier = Modifier
@@ -499,8 +513,6 @@ class MainActivity : ComponentActivity() {
                                             isLoading = viewModel.isLoadingMedia,
                                             loadError = viewModel.mediaLoadError,
                                             playbackProgressMap = viewModel.playbackProgressMap.value,
-                                            searchQuery = viewModel.searchQuery,
-                                            onSearchQueryChange = { viewModel.searchQuery = it },
                                             sortMode = viewModel.videoSortMode,
                                             onSortModeChange = { viewModel.updateVideoSortMode(it) },
                                             continueWatchingVideos = emptyList()
