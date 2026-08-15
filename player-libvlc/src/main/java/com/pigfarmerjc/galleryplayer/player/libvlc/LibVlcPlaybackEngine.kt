@@ -554,15 +554,23 @@ open class LibVlcPlaybackEngine protected constructor(
     }
 
     override fun attachVideoOutput(output: VideoOutputHost) {
-        if (activeVideoOutput != null && activeVideoOutput != output) {
+        if (activeVideoOutput === output) {
+            return
+        }
+        if (activeVideoOutput != null) {
             detachVideoOutput()
         }
         activeVideoOutput = output
         val vlcHost = output as? LibVlcVideoOutputHost ?: return
         val layout = vlcHost.vlcLayout ?: return
         mediaPlayer?.let { player ->
-            player.attachViews(layout, null, true, false)
-            setVideoScaleMode(currentVideoScaleMode)
+            try {
+                player.detachViews()
+                player.attachViews(layout, null, true, false)
+                setVideoScaleMode(currentVideoScaleMode)
+            } catch (e: Exception) {
+                Log.e("LibVlcPlaybackEngine", "Safe attachViews caught: ${e.message}")
+            }
         }
     }
 
