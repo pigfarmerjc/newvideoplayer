@@ -24,6 +24,7 @@ interface PlaybackEngine {
     fun setSpeed(speed: Float)
     fun setRepeatMode(mode: RepeatMode)
     fun setDecoderMode(mode: DecoderMode)
+    fun setVideoScaleMode(mode: VideoScaleMode)
     fun selectAudioTrack(trackId: Int): Boolean
     fun selectSubtitleTrack(trackId: Int): Boolean
     fun attachVideoOutput(output: VideoOutputHost)
@@ -33,11 +34,21 @@ interface PlaybackEngine {
 
 interface VideoOutputHost {
     val view: View
+    fun setVideoScaleMode(mode: VideoScaleMode) {}
     fun dispose()
 }
 
 interface VideoOutputHostFactory {
     fun create(context: Context): VideoOutputHost
+}
+
+enum class VideoScaleMode {
+    FIT,       // 自适应 (保持原比例完整显示)
+    FILL,      // 铺满 (裁剪填满整个屏幕)
+    STRETCH,   // 拉伸 (填满全屏)
+    ORIGINAL,  // 100% 原始尺寸
+    RATIO_16_9,
+    RATIO_4_3
 }
 
 enum class PlaybackState {

@@ -89,34 +89,60 @@ fun ImageViewerScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                // Show fullscreen image using our thumbnail loader
-                MediaThumbnail(
-                    contentUri = image.contentUri,
-                    mediaType = image.mediaType,
-                    modifier = Modifier.fillMaxSize(),
-                    maxDecodeDimension = 2_048,
-                    contentScale = ContentScale.Fit
-                )
-
-                // If the image is a GIF, display the custom notice
                 if (image.isGif) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.6f),
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 24.dp)
-                    ) {
-                        Text(
-                            text = "GIF 将显示静态预览",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    AnimatedGifView(
+                        contentUri = image.contentUri,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Show fullscreen image using our thumbnail loader
+                    MediaThumbnail(
+                        contentUri = image.contentUri,
+                        mediaType = image.mediaType,
+                        modifier = Modifier.fillMaxSize(),
+                        maxDecodeDimension = 2_048,
+                        contentScale = ContentScale.Fit
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+fun AnimatedGifView(
+    contentUri: String,
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            android.widget.ImageView(ctx).apply {
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+            }
+        },
+        update = { imageView ->
+            val uri = android.net.Uri.parse(contentUri)
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+                    val drawable = android.graphics.ImageDecoder.decodeDrawable(source) { decoder, _, _ ->
+                        decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                    }
+                    imageView.setImageDrawable(drawable)
+                    if (drawable is android.graphics.drawable.AnimatedImageDrawable) {
+                        drawable.repeatCount = android.graphics.drawable.AnimatedImageDrawable.REPEAT_INFINITE
+                        drawable.start()
+                    }
+                } else {
+                    val bitmap = android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(uri))
+                    imageView.setImageBitmap(bitmap)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AnimatedGifView", "Error decoding GIF: ${e.message}", e)
+            }
+        },
+        modifier = modifier
+    )
 }

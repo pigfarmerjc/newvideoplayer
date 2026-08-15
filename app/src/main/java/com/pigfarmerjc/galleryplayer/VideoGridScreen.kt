@@ -3,65 +3,47 @@ package com.pigfarmerjc.galleryplayer
 import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
+import java.util.Calendar
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+sealed class PhotosGridItem {
+    data class Header(val label: String, val count: Int) : PhotosGridItem()
+    data class Video(val item: LocalMediaItem) : PhotosGridItem()
+}
 
 @Composable
 fun VideoGridScreen(
@@ -73,23 +55,28 @@ fun VideoGridScreen(
     playbackProgressMap: Map<String, Float> = emptyMap(),
     sortMode: VideoSortMode,
     onSortModeChange: (VideoSortMode) -> Unit,
-    continueWatchingVideos: List<LocalMediaItem>,
+    continueWatchingVideos: List<LocalMediaItem> = emptyList(),
     gridState: LazyGridState = rememberLazyGridState()
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     if (!PermissionState.hasVideoPermission(context)) {
         InlinePermissionRequest(permissionType = "video", onGranted = onRefresh)
         return
     }
 
-    val filteredVideos by remember(videos, sortMode) {
-        derivedStateOf { VideoFilterAndSort.filterAndSort(videos, "", sortMode) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val filteredVideos by remember(videos, searchQuery, sortMode) {
+        derivedStateOf { VideoFilterAndSort.filterAndSort(videos, searchQuery, sortMode) }
     }
+
     val configuration = LocalConfiguration.current
-    val columns = GalleryLayout.columnsForWidth(
-        configuration.screenWidthDp,
-        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    )
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val defaultCols = if (configuration.screenWidthDp >= 840) 6 else if (isLandscape) 5 else 4
+
+    var baseColumns by rememberSaveable { mutableIntStateOf(defaultCols) }
+    var columnScaleFactor by remember { mutableFloatStateOf(1f) }
+    val currentColumns = (baseColumns / columnScaleFactor).roundToInt().coerceIn(2, 12)
+
     if (isLoading && videos.isEmpty()) {
         GalleryLoadingState()
         return
@@ -99,51 +86,116 @@ fun VideoGridScreen(
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (isLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    // Date grouping for default chronological sort
+    val gridItems by remember(filteredVideos, sortMode) {
+        derivedStateOf {
+            if (sortMode == VideoSortMode.DATE_MODIFIED_DESC) {
+                buildDateGroupedItems(filteredVideos)
+            } else {
+                filteredVideos.map { PhotosGridItem.Video(it) }
+            }
+        }
+    }
 
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        if (isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        // Apple Photos Top Toolbar
+        PhotosTopToolbar(
+            totalCount = filteredVideos.size,
+            columnCount = currentColumns,
+            searchQuery = searchQuery,
+            onSearchQueryChange = { searchQuery = it },
+            sortMode = sortMode,
+            onSortModeChange = onSortModeChange
+        )
+
+        // Apple Photos Dense Grid with Pinch-to-Zoom Gesture
         LazyVerticalGrid(
-            columns = GridCells.Fixed(columns),
+            columns = GridCells.Fixed(currentColumns),
             state = gridState,
-            contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                VideoLibraryHeader(
-                    count = filteredVideos.size,
-                    sortMode = sortMode,
-                    onSortModeChange = onSortModeChange
-                )
-            }
+            contentPadding = PaddingValues(start = 1.dp, top = 2.dp, end = 1.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+            verticalArrangement = Arrangement.spacedBy(1.5.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        var zoom = 1f
+                        var pastTouchSlop = false
+                        val touchSlop = viewConfiguration.touchSlop
 
-            if (continueWatchingVideos.isNotEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    ContinueWatchingSection(
-                        videos = continueWatchingVideos,
-                        playbackProgressMap = playbackProgressMap,
-                        allVideos = filteredVideos,
-                        onVideoClick = onVideoClick
-                    )
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        do {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                            val canceled = event.changes.any { it.isConsumed }
+                            if (!canceled && event.changes.size >= 2) {
+                                val zoomChange = event.calculateZoom()
+                                if (!pastTouchSlop) {
+                                    zoom *= zoomChange
+                                    val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                                    val zoomMotion = abs(1f - zoom) * centroidSize
+                                    if (zoomMotion > touchSlop) {
+                                        pastTouchSlop = true
+                                    }
+                                }
+                                if (pastTouchSlop) {
+                                    if (zoomChange != 1f) {
+                                        columnScaleFactor = (columnScaleFactor * zoomChange).coerceIn(0.25f, 4.0f)
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            }
+                        } while (!canceled && event.changes.any { it.pressed })
+
+                        if (pastTouchSlop) {
+                            val targetCols = (baseColumns / columnScaleFactor).roundToInt().coerceIn(2, 12)
+                            baseColumns = targetCols
+                            columnScaleFactor = 1f
+                        }
+                    }
                 }
-            }
-
+        ) {
             if (filteredVideos.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     GalleryEmptyState(onRefresh = onRefresh)
                 }
             } else {
                 items(
-                    items = filteredVideos,
-                    key = { it.contentUri },
-                    contentType = { "video-card" }
-                ) { video ->
-                    VideoCard(
-                        video = video,
-                        progressRatio = playbackProgressMap[video.contentUri],
-                        onClick = { onVideoClick(video, filteredVideos) }
-                    )
+                    items = gridItems,
+                    key = {
+                        when (it) {
+                            is PhotosGridItem.Header -> "hdr_${it.label}"
+                            is PhotosGridItem.Video -> it.item.contentUri
+                        }
+                    },
+                    span = { item ->
+                        when (item) {
+                            is PhotosGridItem.Header -> GridItemSpan(maxLineSpan)
+                            is PhotosGridItem.Video -> GridItemSpan(1)
+                        }
+                    }
+                ) { item ->
+                    when (item) {
+                        is PhotosGridItem.Header -> {
+                            PhotosDateHeader(label = item.label, count = item.count)
+                        }
+                        is PhotosGridItem.Video -> {
+                            PhotosCell(
+                                video = item.item,
+                                progressRatio = playbackProgressMap[item.item.contentUri],
+                                columnCount = currentColumns,
+                                onClick = { onVideoClick(item.item, filteredVideos) }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -151,43 +203,87 @@ fun VideoGridScreen(
 }
 
 @Composable
-private fun VideoLibraryHeader(
-    count: Int,
+private fun PhotosTopToolbar(
+    totalCount: Int,
+    columnCount: Int,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
     sortMode: VideoSortMode,
     onSortModeChange: (VideoSortMode) -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp, bottom = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("视频库", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                text = "全部视频 ($totalCount)",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (count == 0) "还没有视频" else "$count 个视频 · 最近更新",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "${columnCount}列",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(Modifier.width(6.dp))
+                PhotosSortMenu(sortMode = sortMode, onSortModeChange = onSortModeChange)
             }
-            SortMenu(sortMode = sortMode, onSortModeChange = onSortModeChange)
         }
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            placeholder = { Text("搜索视频", style = MaterialTheme.typography.bodySmall) },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { onSearchQueryChange("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(24.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                focusedBorderColor = MaterialTheme.colorScheme.primary
+            ),
+            textStyle = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
 @Composable
-private fun SortMenu(sortMode: VideoSortMode, onSortModeChange: (VideoSortMode) -> Unit) {
+private fun PhotosSortMenu(
+    sortMode: VideoSortMode,
+    onSortModeChange: (VideoSortMode) -> Unit
+) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { expanded = true }) {
-            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序", modifier = Modifier.size(18.dp))
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Sort,
+                contentDescription = "排序",
+                modifier = Modifier.size(18.dp)
+            )
             Spacer(Modifier.width(4.dp))
-            Text(sortLabel(sortMode))
+            Text(sortLabel(sortMode), style = MaterialTheme.typography.labelMedium)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             VideoSortMode.entries.forEach { mode ->
@@ -214,194 +310,114 @@ private fun sortLabel(mode: VideoSortMode): String = when (mode) {
 }
 
 @Composable
-private fun ContinueWatchingSection(
-    videos: List<LocalMediaItem>,
-    playbackProgressMap: Map<String, Float>,
-    allVideos: List<LocalMediaItem>,
-    onVideoClick: (LocalMediaItem, List<LocalMediaItem>) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp, bottom = 6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("继续观看", style = MaterialTheme.typography.titleLarge)
-            Text("最近播放", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(end = 16.dp)
-        ) {
-            items(videos, key = { it.contentUri }) { video ->
-                ContinueWatchingCard(
-                    video = video,
-                    progressRatio = playbackProgressMap[video.contentUri],
-                    onClick = { onVideoClick(video, allVideos) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ContinueWatchingCard(video: LocalMediaItem, progressRatio: Float?, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .width(210.dp)
-            .semantics { role = Role.Button }
-            .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f)
-        ) {
-            MediaThumbnail(video.contentUri, MediaType.VIDEO, Modifier.fillMaxSize(), 420, 236)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
-                        )
-                    )
-            )
-            Icon(
-                Icons.Filled.PlayArrow,
-                contentDescription = "继续播放",
-                tint = Color.White,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(38.dp)
-            )
-            Text(
-                text = video.displayName,
-                color = Color.White,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(10.dp)
-            )
-            if (progressRatio != null) {
-                LinearProgressIndicator(
-                    progress = { progressRatio.coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = Color.White.copy(alpha = 0.28f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun VideoCard(video: LocalMediaItem, progressRatio: Float?, onClick: () -> Unit) {
-    Card(
+private fun PhotosDateHeader(label: String, count: Int) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .semantics { role = Role.Button }
-            .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
-            Box(
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            text = "$count 个视频",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun PhotosCell(
+    video: LocalMediaItem,
+    progressRatio: Float?,
+    columnCount: Int,
+    onClick: () -> Unit
+) {
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val density = LocalDensity.current
+    val thumbnailSizePx = remember(columnCount, screenWidth) {
+        with(density) { (screenWidth / columnCount.coerceAtLeast(1)).toPx().roundToInt() }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clickable(onClick = onClick)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        MediaThumbnail(
+            contentUri = video.contentUri,
+            mediaType = MediaType.VIDEO,
+            modifier = Modifier.fillMaxSize(),
+            width = thumbnailSizePx.coerceAtLeast(60),
+            height = thumbnailSizePx.coerceAtLeast(60),
+            contentScale = ContentScale.Crop
+        )
+
+        // Apple Photos style: NO duration badge, NO filename overlay
+        // Only a slim progress indicator if previously watched
+        progressRatio?.takeIf { it in 0.01f..0.99f }?.let { progress ->
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = Color.Black.copy(alpha = 0.35f),
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-            ) {
-                MediaThumbnail(video.contentUri, MediaType.VIDEO, Modifier.fillMaxSize(), 420, 236)
-                if (video.width != null && video.height != null) {
-                    if (GalleryLayout.is4K(video.width, video.height)) {
-                        Surface(
-                            color = Color.Black.copy(alpha = 0.72f),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
-                        ) {
-                            Text(
-                                text = "4K",
-                                color = Color(0xFFFFD700),
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                    } else if (GalleryLayout.isHD(video.width, video.height)) {
-                        Surface(
-                            color = Color.Black.copy(alpha = 0.60f),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.align(Alignment.TopStart).padding(7.dp)
-                        ) {
-                            Text(
-                                text = "HD",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-                if (video.durationMs != null) {
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.72f),
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(7.dp)
-                    ) {
-                        Text(
-                            text = formatDuration(video.durationMs),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-                if (progressRatio != null) {
-                    LinearProgressIndicator(
-                        progress = { progressRatio.coerceIn(0f, 1f) },
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = Color.White.copy(alpha = 0.22f)
-                    )
-                }
-            }
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(
-                    video.displayName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text(
-                        text = video.relativePath.trimEnd('/').substringAfterLast('/').ifBlank { "根目录" },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (video.fileSize > 0L) {
-                        Text(
-                            text = GalleryLayout.formatFileSize(video.fileSize),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else if (video.width != null && video.height != null) {
-                        Text("${video.width}×${video.height}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
+                    .height(2.5.dp)
+            )
         }
     }
+}
+
+private fun buildDateGroupedItems(videos: List<LocalMediaItem>): List<PhotosGridItem> {
+    if (videos.isEmpty()) return emptyList()
+    val calendar = Calendar.getInstance()
+    val curCalendar = Calendar.getInstance()
+    val curYear = curCalendar.get(Calendar.YEAR)
+    val curDayOfYear = curCalendar.get(Calendar.DAY_OF_YEAR)
+
+    val grouped = linkedMapOf<String, MutableList<LocalMediaItem>>()
+
+    for (video in videos) {
+        val epochSeconds = video.dateModifiedEpochSeconds ?: 0L
+        val dateMs = if (epochSeconds > 0L) epochSeconds * 1000L else 0L
+        val label = if (dateMs <= 0L) {
+            "其他"
+        } else {
+            calendar.timeInMillis = dateMs
+            val year = calendar.get(Calendar.YEAR)
+            val month = calendar.get(Calendar.MONTH) + 1
+            val day = calendar.get(Calendar.DAY_OF_MONTH)
+
+            if (curYear == year && curDayOfYear == calendar.get(Calendar.DAY_OF_YEAR)) {
+                "今天"
+            } else if (curYear == year && curDayOfYear - calendar.get(Calendar.DAY_OF_YEAR) == 1) {
+                "昨天"
+            } else if (curYear == year) {
+                "${month}月${day}日"
+            } else {
+                "${year}年${month}月"
+            }
+        }
+        grouped.getOrPut(label) { mutableListOf() }.add(video)
+    }
+
+    val result = mutableListOf<PhotosGridItem>()
+    for ((label, list) in grouped) {
+        result.add(PhotosGridItem.Header(label, list.size))
+        for (video in list) {
+            result.add(PhotosGridItem.Video(video))
+        }
+    }
+    return result
 }
 
 @Composable
@@ -418,12 +434,12 @@ private fun GalleryLoadingState() {
 private fun GalleryErrorState(message: String, onRetry: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("视频库暂时无法打开", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
+            Text("视频暂时无法读取", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
             Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(onClick = onRetry) {
                 Icon(Icons.Filled.Refresh, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text("重新扫描")
+                Text("重试")
             }
         }
     }
@@ -433,19 +449,15 @@ private fun GalleryErrorState(message: String, onRetry: () -> Unit) {
 private fun GalleryEmptyState(onRefresh: () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(vertical = 72.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(42.dp))
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(42.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
             Text("还没有找到视频", style = MaterialTheme.typography.titleMedium)
-            Text("把视频放入设备后重新扫描", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("请确认是否已授权或设备中存在本地视频", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = onRefresh) { Text("重新扫描") }
         }
     }
-}
-
-private fun formatDuration(ms: Long): String {
-    val totalSecs = ms.coerceAtLeast(0L) / 1000
-    val hours = totalSecs / 3600
-    val minutes = (totalSecs % 3600) / 60
-    val seconds = totalSecs % 60
-    return if (hours > 0) "%02d:%02d:%02d".format(hours, minutes, seconds)
-    else "%02d:%02d".format(minutes, seconds)
 }

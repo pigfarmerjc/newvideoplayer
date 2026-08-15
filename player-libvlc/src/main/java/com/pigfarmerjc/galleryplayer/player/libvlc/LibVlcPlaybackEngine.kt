@@ -64,6 +64,7 @@ open class LibVlcPlaybackEngine protected constructor(
 
     private var currentDecoderMode = DecoderMode.AUTO
     private var currentRepeatMode = RepeatMode.NONE
+    private var currentVideoScaleMode = VideoScaleMode.FIT
     private var currentUri: Uri? = null
 
     private enum class SourceStrategy {
@@ -107,6 +108,7 @@ open class LibVlcPlaybackEngine protected constructor(
             }
             MediaPlayer.Event.Playing -> {
                 _playbackState.value = PlaybackState.Playing
+                setVideoScaleMode(currentVideoScaleMode)
                 updateMediaDetails()
                 "Playing"
             }
@@ -505,6 +507,37 @@ open class LibVlcPlaybackEngine protected constructor(
         return selected
     }
 
+    override fun setVideoScaleMode(mode: VideoScaleMode) {
+        currentVideoScaleMode = mode
+        val player = mediaPlayer ?: return
+        when (mode) {
+            VideoScaleMode.FIT -> {
+                player.aspectRatio = null
+                player.videoScale = MediaPlayer.ScaleType.SURFACE_BEST_FIT
+            }
+            VideoScaleMode.FILL -> {
+                player.aspectRatio = null
+                player.videoScale = MediaPlayer.ScaleType.SURFACE_FILL
+            }
+            VideoScaleMode.STRETCH -> {
+                player.aspectRatio = null
+                player.videoScale = MediaPlayer.ScaleType.SURFACE_FIT_SCREEN
+            }
+            VideoScaleMode.ORIGINAL -> {
+                player.aspectRatio = null
+                player.videoScale = MediaPlayer.ScaleType.SURFACE_ORIGINAL
+            }
+            VideoScaleMode.RATIO_16_9 -> {
+                player.videoScale = MediaPlayer.ScaleType.SURFACE_16_9
+                player.aspectRatio = "16:9"
+            }
+            VideoScaleMode.RATIO_4_3 -> {
+                player.videoScale = MediaPlayer.ScaleType.SURFACE_4_3
+                player.aspectRatio = "4:3"
+            }
+        }
+    }
+
     override fun attachVideoOutput(output: VideoOutputHost) {
         if (activeVideoOutput != null && activeVideoOutput != output) {
             detachVideoOutput()
@@ -514,6 +547,7 @@ open class LibVlcPlaybackEngine protected constructor(
         val layout = vlcHost.vlcLayout ?: return
         mediaPlayer?.let { player ->
             player.attachViews(layout, null, true, false)
+            setVideoScaleMode(currentVideoScaleMode)
         }
     }
 

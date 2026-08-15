@@ -86,6 +86,8 @@ fun PlayerScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var speedExpanded by remember { mutableStateOf(false) }
     var tracksExpanded by remember { mutableStateOf(false) }
+    var scaleExpanded by remember { mutableStateOf(false) }
+    var videoScaleMode by remember { mutableStateOf(VideoScaleMode.FIT) }
     var isDragging by remember { mutableStateOf(false) }
     var dragPosition by remember { mutableStateOf(0f) }
 
@@ -688,6 +690,85 @@ fun PlayerScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { scaleExpanded = true }) {
+                            Icon(Icons.Filled.AspectRatio, contentDescription = "画面比例", tint = Color.White)
+                        }
+                        DropdownMenu(expanded = scaleExpanded, onDismissRequest = { scaleExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("自适应 (默认)") },
+                                leadingIcon = {
+                                    if (videoScaleMode == VideoScaleMode.FIT) Icon(Icons.Filled.Check, contentDescription = null)
+                                    else Spacer(Modifier.size(24.dp))
+                                },
+                                onClick = {
+                                    videoScaleMode = VideoScaleMode.FIT
+                                    playbackEngine.setVideoScaleMode(VideoScaleMode.FIT)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("铺满全屏 (裁剪)") },
+                                leadingIcon = {
+                                    if (videoScaleMode == VideoScaleMode.FILL) Icon(Icons.Filled.Check, contentDescription = null)
+                                    else Spacer(Modifier.size(24.dp))
+                                },
+                                onClick = {
+                                    videoScaleMode = VideoScaleMode.FILL
+                                    playbackEngine.setVideoScaleMode(VideoScaleMode.FILL)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("拉伸全屏") },
+                                leadingIcon = {
+                                    if (videoScaleMode == VideoScaleMode.STRETCH) Icon(Icons.Filled.Check, contentDescription = null)
+                                    else Spacer(Modifier.size(24.dp))
+                                },
+                                onClick = {
+                                    videoScaleMode = VideoScaleMode.STRETCH
+                                    playbackEngine.setVideoScaleMode(VideoScaleMode.STRETCH)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("16:9 比例") },
+                                leadingIcon = {
+                                    if (videoScaleMode == VideoScaleMode.RATIO_16_9) Icon(Icons.Filled.Check, contentDescription = null)
+                                    else Spacer(Modifier.size(24.dp))
+                                },
+                                onClick = {
+                                    videoScaleMode = VideoScaleMode.RATIO_16_9
+                                    playbackEngine.setVideoScaleMode(VideoScaleMode.RATIO_16_9)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("4:3 比例") },
+                                leadingIcon = {
+                                    if (videoScaleMode == VideoScaleMode.RATIO_4_3) Icon(Icons.Filled.Check, contentDescription = null)
+                                    else Spacer(Modifier.size(24.dp))
+                                },
+                                onClick = {
+                                    videoScaleMode = VideoScaleMode.RATIO_4_3
+                                    playbackEngine.setVideoScaleMode(VideoScaleMode.RATIO_4_3)
+                                    scaleExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("100% 原始尺寸") },
+                                leadingIcon = {
+                                    if (videoScaleMode == VideoScaleMode.ORIGINAL) Icon(Icons.Filled.Check, contentDescription = null)
+                                    else Spacer(Modifier.size(24.dp))
+                                },
+                                onClick = {
+                                    videoScaleMode = VideoScaleMode.ORIGINAL
+                                    playbackEngine.setVideoScaleMode(VideoScaleMode.ORIGINAL)
+                                    scaleExpanded = false
+                                }
+                            )
                         }
                     }
                     Box {
