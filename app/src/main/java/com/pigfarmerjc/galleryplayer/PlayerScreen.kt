@@ -30,9 +30,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
@@ -40,6 +44,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -151,9 +156,6 @@ fun PlayerScreen(
 
     // Protect playCount increment from pausing/resuming repeatedly
     var hasStartedSession by remember(videoUri) { mutableStateOf(false) }
-
-    // Drag down to dismiss tracking
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
 
     val density = LocalDensity.current
 
@@ -352,14 +354,80 @@ fun PlayerScreen(
         }
     }
 
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    val absOffsetY = abs(dragOffsetY)
+    val dismissProgress = if (screenHeightPx > 0f) (absOffsetY / screenHeightPx).coerceIn(0f, 1f) else 0f
+    val dismissScale = (1f - dismissProgress * 0.25f).coerceIn(0.70f, 1f)
+    val bgAlpha = if (absOffsetY > 0f) (1f - (absOffsetY / (screenHeightPx * 0.45f))).coerceIn(0f, 1f) else 1f
+    val dismissCornerRadius = (28f * (dismissProgress * 2.5f).coerceIn(0f, 1f)).dp
+    val dismissThresholdPx = with(density) { 100.dp.toPx() }
+
+    val nestedScrollConnection = remember(screenHeightPx, dismissThresholdPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (dragOffsetY != 0f) {
+                    dragOffsetY += available.y
+                    return Offset(0f, available.y)
+                }
+                if (abs(available.y) > abs(available.x) && abs(available.y) > 4f) {
+                    dragOffsetY += available.y
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (available.y != 0f) {
+                    dragOffsetY += available.y
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val velocityY = available.y
+                val shouldDismiss = abs(dragOffsetY) > dismissThresholdPx || abs(velocityY) > 750f
+                if (shouldDismiss && abs(dragOffsetY) > 16f) {
+                    val targetY = if (dragOffsetY >= 0) screenHeightPx else -screenHeightPx
+                    Animatable(dragOffsetY).animateTo(
+                        targetY,
+                        tween(180, easing = FastOutSlowInEasing)
+                    ) {
+                        dragOffsetY = value
+                    }
+                    saveProgressAndStop()
+                    onBack()
+                } else {
+                    Animatable(dragOffsetY).animateTo(
+                        0f,
+                        spring(0.82f, Spring.StiffnessMediumLow)
+                    ) {
+                        dragOffsetY = value
+                    }
+                }
+                return Velocity(0f, velocityY)
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color.Black.copy(alpha = bgAlpha))
+            .nestedScroll(nestedScrollConnection)
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = dragOffsetY
+                    scaleX = dismissScale
+                    scaleY = dismissScale
+                    clip = dismissProgress > 0.005f
+                    shape = RoundedCornerShape(dismissCornerRadius)
+                },
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1
         ) { page ->
