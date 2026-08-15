@@ -299,6 +299,16 @@ fun PlayerScreen(
         }
     }
 
+    // Sync Android view visibility with isFirstFrameReady so that:
+    // - When switching videos the view is immediately INVISIBLE (hides the last decoded frame of the old video)
+    // - Once the new video's first frame is confirmed ready the view becomes VISIBLE again
+    // The graphicsLayer alpha=0 alone is a Compose draw-layer effect and does NOT prevent the Surface
+    // from rendering stale VLC frames; we need the actual View visibility flag as well.
+    LaunchedEffect(isFirstFrameReady, videoHost) {
+        val view = videoHost?.view ?: return@LaunchedEffect
+        view.visibility = if (isFirstFrameReady) android.view.View.VISIBLE else android.view.View.INVISIBLE
+    }
+
     // Preload next and previous video thumbnails in background for instantaneous zero-latency swipe previews
     LaunchedEffect(currentIndex, videoList) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

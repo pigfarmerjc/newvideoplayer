@@ -155,7 +155,8 @@ open class LibVlcPlaybackEngine protected constructor(
                 _positionMs.value = time
                 if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
                     _playbackState.value = PlaybackState.Playing
-                    activeVideoOutput?.view?.visibility = android.view.View.VISIBLE
+                    // Do NOT set view visibility here; the UI layer controls frame visibility
+                    // via isFirstFrameReady + graphicsLayer alpha to avoid residual-frame flicker.
                     updateMediaDetails()
                 }
                 "TimeChanged"
@@ -164,7 +165,8 @@ open class LibVlcPlaybackEngine protected constructor(
                 _isSeekable.value = mediaPlayer?.isSeekable ?: false
                 if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
                     _playbackState.value = PlaybackState.Playing
-                    activeVideoOutput?.view?.visibility = android.view.View.VISIBLE
+                    // Do NOT set view visibility here; the UI layer controls frame visibility
+                    // via isFirstFrameReady + graphicsLayer alpha to avoid residual-frame flicker.
                     updateMediaDetails()
                 }
                 "PositionChanged"
