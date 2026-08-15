@@ -87,6 +87,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var videoSortMode by mutableStateOf(VideoSortMode.DATE_MODIFIED_DESC)
     var folderSortMode by mutableStateOf(FolderSortMode.VIDEO_COUNT_DESC)
     var repeatModeState by mutableStateOf(PlaybackRepeatMode.NONE)
+    // Persistent navigation & scroll states
+    var activeHomeTab by mutableStateOf(HomeTab.VIDEOS)
+    var videoGridColumnCount by mutableIntStateOf(0)
+    val videoGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
+    val folderGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
+    val imageGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
+    val folderVideosGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
 
     val historyListState = mutableStateOf<List<com.pigfarmerjc.galleryplayer.core.database.repository.PlaybackHistoryItem>>(emptyList())
 
@@ -106,6 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val sharedPrefs = application.getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
         defaultSpeed = sharedPrefs.getFloat("default_speed", 1.0f)
         skipSeconds = sharedPrefs.getInt("skip_seconds", 10)
+        videoGridColumnCount = sharedPrefs.getInt("video_grid_column_count", 0)
 
         val sortPrefs = application.getSharedPreferences("library_sort_settings", android.content.Context.MODE_PRIVATE)
         videoSortMode = VideoSortMode.valueOf(sortPrefs.getString("video_sort_mode", VideoSortMode.DATE_MODIFIED_DESC.name) ?: VideoSortMode.DATE_MODIFIED_DESC.name)
@@ -204,6 +212,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         playbackEngine.setDecoderMode(mode)
         getApplication<Application>().getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
             .edit().putString("decoder_mode", mode.name).apply()
+    }
+
+    fun updateVideoGridColumnCount(cols: Int) {
+        videoGridColumnCount = cols
+        getApplication<Application>().getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putInt("video_grid_column_count", cols).apply()
     }
 
     fun startPlaybackSession(video: LocalMediaItem) {
@@ -400,165 +414,207 @@ class MainActivity : ComponentActivity() {
                             viewModel.refreshLocalMedia(context)
                         }
                     } else {
-                        // Custom stack-based navigation
+                        // Layered Overlay Navigation Architecture
                         val screenStack = remember { mutableStateListOf<Screen>(Screen.Home) }
 
-                        when (val currentScreen = screenStack.lastOrNull()) {
-                            is Screen.Home -> {
-                                HomeScreen(
-                                    videos = viewModel.videosList,
-                                    images = viewModel.imagesList,
-                                    folders = viewModel.foldersList,
-                                    onVideoClick = { video, list ->
-                                        scope.launch {
-                                            val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
-                                            if (resumePos > 0L) {
-                                                android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            // Layer 1: Base Screen (HomeScreen or FolderVideos)
+                            val baseScreen = screenStack.lastOrNull { it is Screen.Home || it is Screen.FolderVideos } ?: Screen.Home
+                            when (baseScreen) {
+                                is Screen.Home -> {
+                                    HomeScreen(
+                                        videos = viewModel.videosList,
+                                        images = viewModel.imagesList,
+                                        folders = viewModel.foldersList,
+                                        activeTab = viewModel.activeHomeTab,
+                                        onActiveTabChange = { viewModel.activeHomeTab = it },
+                                        videoGridState = viewModel.videoGridState,
+                                        folderGridState = viewModel.folderGridState,
+                                        imageGridState = viewModel.imageGridState,
+                                        videoGridColumnCount = viewModel.videoGridColumnCount,
+                                        onVideoGridColumnCountChange = { viewModel.updateVideoGridColumnCount(it) },
+                                        onVideoClick = { video, list ->
+                                            scope.launch {
+                                                val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
+                                                if (resumePos > 0L) {
+                                                    android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                                screenStack.add(
+                                                    Screen.Player(
+                                                        videoUri = video.contentUri,
+                                                        videoTitle = video.displayName,
+                                                        videoList = list,
+                                                        currentIndex = list.indexOf(video),
+                                                        initialPositionMs = resumePos
+                                                    )
+                                                )
                                             }
+                                        },
+                                        onFolderClick = { folder ->
                                             screenStack.add(
-                                                Screen.Player(
-                                                    videoUri = video.contentUri,
-                                                    videoTitle = video.displayName,
-                                                    videoList = list,
-                                                    currentIndex = list.indexOf(video),
-                                                    initialPositionMs = resumePos
+                                                Screen.FolderVideos(
+                                                    volumeName = folder.volumeName,
+                                                    relativePath = folder.relativePath,
+                                                    folderDisplayName = folder.displayName
                                                 )
                                             )
-                                        }
-                                    },
-                                    onFolderClick = { folder ->
-                                        screenStack.add(
-                                            Screen.FolderVideos(
-                                                volumeName = folder.volumeName,
-                                                relativePath = folder.relativePath,
-                                                folderDisplayName = folder.displayName
+                                        },
+                                        onImageClick = { image, list ->
+                                            screenStack.add(
+                                                Screen.ImageViewer(
+                                                    images = list,
+                                                    initialIndex = list.indexOf(image)
+                                                )
                                             )
-                                        )
-                                    },
-                                    onImageClick = { image, list ->
-                                        screenStack.add(
-                                            Screen.ImageViewer(
-                                                images = list,
-                                                initialIndex = list.indexOf(image)
-                                            )
-                                        )
-                                    },
-                                    onReload = { viewModel.refreshLocalMedia(context) },
-                                    mediaRepositoryCount = viewModel.mediaRepositoryCount,
-                                    playbackEngine = viewModel.playbackEngine,
-                                    isLoadingMedia = viewModel.isLoadingMedia,
-                                    mediaLoadError = viewModel.mediaLoadError,
-                                    playbackProgressMap = viewModel.playbackProgressMap.value,
-                                    defaultSpeed = viewModel.defaultSpeed,
-                                    skipSeconds = viewModel.skipSeconds,
-                                    onDefaultSpeedChange = { viewModel.updateDefaultSpeed(it) },
-                                    onSkipSecondsChange = { viewModel.updateSkipSeconds(it) },
-                                    videoSortMode = viewModel.videoSortMode,
-                                    onVideoSortModeChange = { viewModel.updateVideoSortMode(it) },
-                                    folderSortMode = viewModel.folderSortMode,
-                                    onFolderSortModeChange = { viewModel.updateFolderSortMode(it) },
-                                    continueWatchingVideos = viewModel.continueWatchingList.value,
-                                    lastRefreshDurationMs = viewModel.lastRefreshDurationMs,
-                                    mediaStoreVolumes = viewModel.mediaStoreVolumes,
-                                    safAuthorizedFolders = viewModel.safAuthorizedFolders,
-                                    lastPlayedUri = viewModel.lastPlayedUri,
-                                    lastPlayedTitle = viewModel.lastPlayedTitle,
-                                    lastPlayedSize = viewModel.lastPlayedSize,
-                                    decoderModeState = viewModel.decoderModeState,
-                                    onDecoderModeChange = { viewModel.updateDecoderMode(it) },
-                                    onAddSafFolder = { viewModel.addSafFolder(it, context) },
-                                    onRemoveSafFolder = { viewModel.removeSafFolder(it, context) }
-                                )
-                            }
-                            is Screen.FolderVideos -> {
-                                val folderVideos = FolderSort.videosInFolder(
-                                    videos = viewModel.videosList,
-                                    volumeName = currentScreen.volumeName,
-                                    relativePath = currentScreen.relativePath
-                                )
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(56.dp)
-                                            .background(MaterialTheme.colorScheme.surface)
-                                            .padding(horizontal = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        IconButton(onClick = { screenStack.removeAt(screenStack.lastIndex) }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = currentScreen.folderDisplayName,
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        VideoGridScreen(
-                                            videos = folderVideos,
-                                            onVideoClick = { video, list ->
-                                                scope.launch {
-                                                    val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
-                                                    if (resumePos > 0L) {
-                                                        android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    screenStack.add(
-                                                        Screen.Player(
-                                                            videoUri = video.contentUri,
-                                                            videoTitle = video.displayName,
-                                                            videoList = list,
-                                                            currentIndex = list.indexOf(video),
-                                                            initialPositionMs = resumePos
-                                                        )
-                                                    )
+                                        },
+                                        onReload = { viewModel.refreshLocalMedia(context) },
+                                        mediaRepositoryCount = viewModel.mediaRepositoryCount,
+                                        playbackEngine = viewModel.playbackEngine,
+                                        isLoadingMedia = viewModel.isLoadingMedia,
+                                        mediaLoadError = viewModel.mediaLoadError,
+                                        playbackProgressMap = viewModel.playbackProgressMap.value,
+                                        defaultSpeed = viewModel.defaultSpeed,
+                                        skipSeconds = viewModel.skipSeconds,
+                                        onDefaultSpeedChange = { viewModel.updateDefaultSpeed(it) },
+                                        onSkipSecondsChange = { viewModel.updateSkipSeconds(it) },
+                                        videoSortMode = viewModel.videoSortMode,
+                                        onVideoSortModeChange = { viewModel.updateVideoSortMode(it) },
+                                        folderSortMode = viewModel.folderSortMode,
+                                        onFolderSortModeChange = { viewModel.updateFolderSortMode(it) },
+                                        continueWatchingVideos = viewModel.continueWatchingList.value,
+                                        lastRefreshDurationMs = viewModel.lastRefreshDurationMs,
+                                        mediaStoreVolumes = viewModel.mediaStoreVolumes,
+                                        safAuthorizedFolders = viewModel.safAuthorizedFolders,
+                                        lastPlayedUri = viewModel.lastPlayedUri,
+                                        lastPlayedTitle = viewModel.lastPlayedTitle,
+                                        lastPlayedSize = viewModel.lastPlayedSize,
+                                        decoderModeState = viewModel.decoderModeState,
+                                        onDecoderModeChange = { viewModel.updateDecoderMode(it) },
+                                        onAddSafFolder = { viewModel.addSafFolder(it, context) },
+                                        onRemoveSafFolder = { viewModel.removeSafFolder(it, context) }
+                                    )
+                                }
+                                is Screen.FolderVideos -> {
+                                    val folderVideos = FolderSort.videosInFolder(
+                                        videos = viewModel.videosList,
+                                        volumeName = baseScreen.volumeName,
+                                        relativePath = baseScreen.relativePath
+                                    )
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(56.dp)
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            IconButton(onClick = {
+                                                val folderIndex = screenStack.indexOfLast { it is Screen.FolderVideos }
+                                                if (folderIndex >= 0) {
+                                                    screenStack.removeAt(folderIndex)
                                                 }
-                                            },
-                                            onRefresh = { viewModel.refreshLocalMedia(context) },
-                                            isLoading = viewModel.isLoadingMedia,
-                                            loadError = viewModel.mediaLoadError,
-                                            playbackProgressMap = viewModel.playbackProgressMap.value,
-                                            sortMode = viewModel.videoSortMode,
-                                            onSortModeChange = { viewModel.updateVideoSortMode(it) },
-                                            continueWatchingVideos = emptyList()
-                                        )
+                                            }) {
+                                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = baseScreen.folderDisplayName,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                        }
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            VideoGridScreen(
+                                                videos = folderVideos,
+                                                gridState = viewModel.folderVideosGridState,
+                                                onVideoClick = { video, list ->
+                                                    scope.launch {
+                                                        val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
+                                                        if (resumePos > 0L) {
+                                                            android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        screenStack.add(
+                                                            Screen.Player(
+                                                                videoUri = video.contentUri,
+                                                                videoTitle = video.displayName,
+                                                                videoList = list,
+                                                                currentIndex = list.indexOf(video),
+                                                                initialPositionMs = resumePos
+                                                            )
+                                                        )
+                                                    }
+                                                },
+                                                onRefresh = { viewModel.refreshLocalMedia(context) },
+                                                isLoading = viewModel.isLoadingMedia,
+                                                loadError = viewModel.mediaLoadError,
+                                                playbackProgressMap = viewModel.playbackProgressMap.value,
+                                                sortMode = viewModel.videoSortMode,
+                                                onSortModeChange = { viewModel.updateVideoSortMode(it) }
+                                            )
+                                        }
+                                    }
+                                    BackHandler {
+                                        val folderIndex = screenStack.indexOfLast { it is Screen.FolderVideos }
+                                        if (folderIndex >= 0) {
+                                            screenStack.removeAt(folderIndex)
+                                        }
                                     }
                                 }
-                                BackHandler {
-                                    screenStack.removeAt(screenStack.lastIndex)
-                                }
+                                else -> Unit
                             }
-                            is Screen.Player -> {
+
+                            // Layer 2: Overlay ImageViewer (if active)
+                            val activeImageViewer = screenStack.lastOrNull { it is Screen.ImageViewer } as? Screen.ImageViewer
+                            if (activeImageViewer != null) {
+                                ImageViewerScreen(
+                                    images = activeImageViewer.images,
+                                    initialIndex = activeImageViewer.initialIndex,
+                                    onBack = {
+                                        val idx = screenStack.indexOfLast { it is Screen.ImageViewer }
+                                        if (idx >= 0) screenStack.removeAt(idx)
+                                    }
+                                )
+                            }
+
+                            // Layer 3: Overlay Player (if active)
+                            val activePlayer = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
+                            if (activePlayer != null) {
                                 PlayerScreen(
-                                    videoUri = currentScreen.videoUri,
-                                    videoTitle = currentScreen.videoTitle,
-                                    videoList = currentScreen.videoList,
-                                    currentIndex = currentScreen.currentIndex,
+                                    videoUri = activePlayer.videoUri,
+                                    videoTitle = activePlayer.videoTitle,
+                                    videoList = activePlayer.videoList,
+                                    currentIndex = activePlayer.currentIndex,
                                     playbackEngine = viewModel.playbackEngine,
                                     videoOutputFactory = viewModel.videoOutputFactory,
                                     onChangeVideo = { newIndex ->
-                                        val newItem = currentScreen.videoList[newIndex]
+                                        val newItem = activePlayer.videoList[newIndex]
                                         scope.launch {
                                             val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
                                             if (resumePos > 0L) {
                                                 android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
                                             }
-                                            screenStack[screenStack.lastIndex] = Screen.Player(
-                                                videoUri = newItem.contentUri,
-                                                videoTitle = newItem.displayName,
-                                                videoList = currentScreen.videoList,
-                                                currentIndex = newIndex,
-                                                initialPositionMs = resumePos
-                                            )
+                                            val pIdx = screenStack.indexOfLast { it is Screen.Player }
+                                            if (pIdx >= 0) {
+                                                screenStack[pIdx] = Screen.Player(
+                                                    videoUri = newItem.contentUri,
+                                                    videoTitle = newItem.displayName,
+                                                    videoList = activePlayer.videoList,
+                                                    currentIndex = newIndex,
+                                                    initialPositionMs = resumePos
+                                                )
+                                            }
                                         }
                                     },
-                                    onBack = { screenStack.removeAt(screenStack.lastIndex) },
-                                    initialPositionMs = currentScreen.initialPositionMs,
+                                    onBack = {
+                                        val pIdx = screenStack.indexOfLast { it is Screen.Player }
+                                        if (pIdx >= 0) screenStack.removeAt(pIdx)
+                                    },
+                                    initialPositionMs = activePlayer.initialPositionMs,
                                     onPlaybackSessionStart = {
-                                        viewModel.startPlaybackSession(currentScreen.videoList[currentScreen.currentIndex])
+                                        viewModel.startPlaybackSession(activePlayer.videoList[activePlayer.currentIndex])
                                     },
                                     onPlaybackProgress = { pos, dur, completed ->
-                                        val currentVideo = currentScreen.videoList[currentScreen.currentIndex]
+                                        val currentVideo = activePlayer.videoList[activePlayer.currentIndex]
                                         if (completed) {
                                             viewModel.markPlaybackCompleted(currentVideo, dur)
                                         } else {
@@ -575,16 +631,6 @@ class MainActivity : ComponentActivity() {
                                     repeatMode = viewModel.repeatModeState,
                                     onRepeatModeChange = { viewModel.updateRepeatMode(it) }
                                 )
-                            }
-                            is Screen.ImageViewer -> {
-                                ImageViewerScreen(
-                                    images = currentScreen.images,
-                                    initialIndex = currentScreen.initialIndex,
-                                    onBack = { screenStack.removeAt(screenStack.lastIndex) }
-                                )
-                            }
-                            null -> {
-                                screenStack.add(Screen.Home)
                             }
                         }
                     }

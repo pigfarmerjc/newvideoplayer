@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -29,6 +30,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -37,6 +40,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.pigfarmerjc.galleryplayer.core.model.MediaType
 import com.pigfarmerjc.galleryplayer.core.player.api.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -270,46 +274,111 @@ fun PlayerScreen(
         }
     }
 
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+
+    // Backdrop opacity: when dragging down, alpha scales down smoothly so underlying gallery is visible
+    val bgAlpha = remember(dragOffsetY, dragDirection) {
+        if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
+            (1f - (dragOffsetY / (screenHeightPx * 0.55f))).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+    }
+
+    val isDraggingGesture = dragDirection != DragDirection.Undecided || abs(dragOffsetX) > 0f || abs(dragOffsetY) > 0f
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
-            .graphicsLayer {
-                when (dragDirection) {
-                    DragDirection.Horizontal -> {
-                        translationX = dragOffsetX
-                        if (size.width > 0f) {
-                            alpha = 1f - (abs(dragOffsetX) / size.width).coerceIn(0f, 1f) * 0.18f
+            .background(Color.Black.copy(alpha = bgAlpha))
+    ) {
+        // 1. Active Video Layer (transforms on drag)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    when (dragDirection) {
+                        DragDirection.Horizontal -> {
+                            translationX = dragOffsetX
+                        }
+                        DragDirection.Vertical -> {
+                            val progress = if (size.height > 0f) {
+                                (dragOffsetY.coerceAtLeast(0f) / size.height).coerceIn(0f, 1f)
+                            } else 0f
+                            translationY = dragOffsetY.coerceAtLeast(0f)
+                            val scale = (1f - progress * 0.22f).coerceIn(0.75f, 1f)
+                            scaleX = scale
+                            scaleY = scale
+                            clip = progress > 0.005f
+                            shape = RoundedCornerShape((28f * (progress * 2.5f).coerceIn(0f, 1f)).dp)
+                        }
+                        DragDirection.Undecided -> {
+                            if (dragOffsetX != 0f) translationX = dragOffsetX
+                            if (dragOffsetY != 0f) translationY = dragOffsetY.coerceAtLeast(0f)
                         }
                     }
-                    DragDirection.Vertical -> {
-                        val progress = if (size.height > 0f) {
-                            (dragOffsetY.coerceAtLeast(0f) / size.height).coerceIn(0f, 1f)
-                        } else 0f
-                        translationY = dragOffsetY.coerceAtLeast(0f)
-                        scaleX = 1f - progress * 0.08f
-                        scaleY = 1f - progress * 0.08f
-                        clip = progress > 0f
-                        shape = RoundedCornerShape((24f * progress).dp)
-                    }
-                    DragDirection.Undecided -> Unit
                 }
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    val host = videoOutputFactory.create(ctx)
+                    videoHost = host
+                    playbackEngine.attachVideoOutput(host)
+                    host.view
+                },
+                modifier = Modifier.fillMaxSize(),
+                onRelease = {
+                    playbackEngine.detachVideoOutput()
+                    videoHost?.dispose()
+                    videoHost = null
+                }
+            )
+        }
+
+        // 2. Next Video Side Preview (attached to the right when swiping left)
+        if (dragOffsetX < 0f && currentIndex < videoList.size - 1) {
+            val nextVideo = videoList[currentIndex + 1]
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = size.width + dragOffsetX + 16.dp.toPx()
+                    }
+                    .background(Color.Black)
+            ) {
+                MediaThumbnail(
+                    contentUri = nextVideo.contentUri,
+                    mediaType = MediaType.VIDEO,
+                    modifier = Modifier.fillMaxSize(),
+                    width = 1920,
+                    height = 1080,
+                    contentScale = ContentScale.Fit
+                )
             }
-    ) {
-        AndroidView(
-            factory = { ctx ->
-                val host = videoOutputFactory.create(ctx)
-                videoHost = host
-                playbackEngine.attachVideoOutput(host)
-                host.view
-            },
-            modifier = Modifier.fillMaxSize(),
-            onRelease = {
-                playbackEngine.detachVideoOutput()
-                videoHost?.dispose()
-                videoHost = null
+        }
+
+        // 3. Previous Video Side Preview (attached to the left when swiping right)
+        if (dragOffsetX > 0f && currentIndex > 0) {
+            val prevVideo = videoList[currentIndex - 1]
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = -size.width + dragOffsetX - 16.dp.toPx()
+                    }
+                    .background(Color.Black)
+            ) {
+                MediaThumbnail(
+                    contentUri = prevVideo.contentUri,
+                    mediaType = MediaType.VIDEO,
+                    modifier = Modifier.fillMaxSize(),
+                    width = 1920,
+                    height = 1080,
+                    contentScale = ContentScale.Fit
+                )
             }
-        )
+        }
 
         // Gesture Overlay Detector Area
         Box(
@@ -413,8 +482,9 @@ fun PlayerScreen(
                                 PlayerDragAction.Previous -> {
                                     gestureSettling = true
                                     settleJob = coroutineScope.launch {
+                                        val targetX = size.width.toFloat() + 16.dp.toPx()
                                         val anim = Animatable(dragOffsetX)
-                                        anim.animateTo(size.width.toFloat(), tween(160)) { dragOffsetX = value }
+                                        anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
                                         saveProgressAndStop()
                                         onChangeVideo(currentIndex - 1)
                                         dragOffsetX = 0f
@@ -426,8 +496,9 @@ fun PlayerScreen(
                                 PlayerDragAction.Next -> {
                                     gestureSettling = true
                                     settleJob = coroutineScope.launch {
+                                        val targetX = -size.width.toFloat() - 16.dp.toPx()
                                         val anim = Animatable(dragOffsetX)
-                                        anim.animateTo(-size.width.toFloat(), tween(160)) { dragOffsetX = value }
+                                        anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
                                         saveProgressAndStop()
                                         onChangeVideo(currentIndex + 1)
                                         dragOffsetX = 0f
@@ -440,7 +511,7 @@ fun PlayerScreen(
                                     gestureSettling = true
                                     settleJob = coroutineScope.launch {
                                         val anim = Animatable(dragOffsetY)
-                                        anim.animateTo(size.height.toFloat(), tween(180)) { dragOffsetY = value }
+                                        anim.animateTo(size.height.toFloat(), tween(180, easing = FastOutSlowInEasing)) { dragOffsetY = value }
                                         saveProgressAndStop()
                                         onBack()
                                         gestureSettling = false
@@ -452,12 +523,13 @@ fun PlayerScreen(
                                     gestureSettling = true
                                     settleJob = coroutineScope.launch {
                                         val animation = spring<Float>(
-                                            dampingRatio = 0.86f,
+                                            dampingRatio = 0.82f,
                                             stiffness = Spring.StiffnessMediumLow
                                         )
-                                        if (settledDirection == DragDirection.Vertical) {
+                                        if (settledDirection == DragDirection.Vertical || dragOffsetY != 0f) {
                                             Animatable(dragOffsetY).animateTo(0f, animation) { dragOffsetY = value }
-                                        } else if (settledDirection == DragDirection.Horizontal) {
+                                        }
+                                        if (settledDirection == DragDirection.Horizontal || dragOffsetX != 0f) {
                                             Animatable(dragOffsetX).animateTo(0f, animation) { dragOffsetX = value }
                                         }
                                         dragOffsetX = 0f
@@ -473,10 +545,11 @@ fun PlayerScreen(
                             val settledDirection = dragDirection
                             gestureSettling = true
                             settleJob = coroutineScope.launch {
-                                val animation = spring<Float>(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow)
-                                if (settledDirection == DragDirection.Vertical) {
+                                val animation = spring<Float>(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)
+                                if (settledDirection == DragDirection.Vertical || dragOffsetY != 0f) {
                                     Animatable(dragOffsetY).animateTo(0f, animation) { dragOffsetY = value }
-                                } else if (settledDirection == DragDirection.Horizontal) {
+                                }
+                                if (settledDirection == DragDirection.Horizontal || dragOffsetX != 0f) {
                                     Animatable(dragOffsetX).animateTo(0f, animation) { dragOffsetX = value }
                                 }
                                 dragOffsetX = 0f

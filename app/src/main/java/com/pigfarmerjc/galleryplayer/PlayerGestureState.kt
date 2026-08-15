@@ -28,11 +28,11 @@ object PlayerGestureState {
     ): PlayerDragAction {
         val absX = abs(dragOffsetX)
         val absY = abs(dragOffsetY)
-        val horizontalFlick = abs(velocityX) >= 1_400f && absX >= horizontalThresholdPx * 0.2f
-        val downwardFlick = velocityY >= 1_600f && dragOffsetY >= verticalThresholdPx * 0.2f
+        val horizontalFlick = abs(velocityX) >= 700f && absX >= horizontalThresholdPx * 0.15f
+        val downwardFlick = velocityY >= 800f && dragOffsetY >= verticalThresholdPx * 0.15f
 
         // Horizontal dominant
-        if (absX > absY || abs(velocityX) > abs(velocityY)) {
+        if (absX > absY || (abs(velocityX) > abs(velocityY) && absX > 20f)) {
             if (absX > horizontalThresholdPx || horizontalFlick) {
                 val movesRight = if (horizontalFlick) velocityX > 0f else dragOffsetX > 0f
                 return if (movesRight) {

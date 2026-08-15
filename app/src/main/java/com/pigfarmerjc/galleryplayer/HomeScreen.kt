@@ -55,13 +55,15 @@ fun HomeScreen(
     decoderModeState: DecoderMode,
     onDecoderModeChange: (DecoderMode) -> Unit,
     onAddSafFolder: (String) -> Unit,
-    onRemoveSafFolder: (String) -> Unit
+    onRemoveSafFolder: (String) -> Unit,
+    activeTab: HomeTab = HomeTab.VIDEOS,
+    onActiveTabChange: (HomeTab) -> Unit = {},
+    videoGridState: androidx.compose.foundation.lazy.grid.LazyGridState = rememberLazyGridState(),
+    folderGridState: androidx.compose.foundation.lazy.grid.LazyGridState = rememberLazyGridState(),
+    imageGridState: androidx.compose.foundation.lazy.grid.LazyGridState = rememberLazyGridState(),
+    videoGridColumnCount: Int = 0,
+    onVideoGridColumnCountChange: (Int) -> Unit = {}
 ) {
-    var activeTab by rememberSaveable { mutableStateOf(HomeTab.VIDEOS) }
-    val videoGridState = rememberLazyGridState()
-    val folderGridState = rememberLazyGridState()
-    val imageGridState = rememberLazyGridState()
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
@@ -69,10 +71,10 @@ fun HomeScreen(
                 containerColor = MaterialTheme.colorScheme.surface,
                 tonalElevation = 10.dp
             ) {
-                GalleryNavItem(HomeTab.VIDEOS, activeTab, "视频", Icons.Filled.PlayArrow) { activeTab = it }
-                GalleryNavItem(HomeTab.FOLDERS, activeTab, "文件夹", Icons.Filled.Folder) { activeTab = it }
-                GalleryNavItem(HomeTab.IMAGES, activeTab, "图片", Icons.Filled.Image) { activeTab = it }
-                GalleryNavItem(HomeTab.SETTINGS, activeTab, "设置", Icons.Filled.Settings) { activeTab = it }
+                GalleryNavItem(HomeTab.VIDEOS, activeTab, "视频", Icons.Filled.PlayArrow) { onActiveTabChange(it) }
+                GalleryNavItem(HomeTab.FOLDERS, activeTab, "文件夹", Icons.Filled.Folder) { onActiveTabChange(it) }
+                GalleryNavItem(HomeTab.IMAGES, activeTab, "图片", Icons.Filled.Image) { onActiveTabChange(it) }
+                GalleryNavItem(HomeTab.SETTINGS, activeTab, "设置", Icons.Filled.Settings) { onActiveTabChange(it) }
             }
         }
     ) { innerPadding ->
@@ -93,7 +95,9 @@ fun HomeScreen(
                     sortMode = videoSortMode,
                     onSortModeChange = onVideoSortModeChange,
                     continueWatchingVideos = continueWatchingVideos,
-                    gridState = videoGridState
+                    gridState = videoGridState,
+                    persistedColumnCount = videoGridColumnCount,
+                    onColumnCountChange = onVideoGridColumnCountChange
                 )
                 HomeTab.FOLDERS -> FolderScreen(
                     folders = folders,

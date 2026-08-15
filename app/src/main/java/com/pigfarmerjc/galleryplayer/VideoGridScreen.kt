@@ -56,7 +56,9 @@ fun VideoGridScreen(
     sortMode: VideoSortMode,
     onSortModeChange: (VideoSortMode) -> Unit,
     continueWatchingVideos: List<LocalMediaItem> = emptyList(),
-    gridState: LazyGridState = rememberLazyGridState()
+    gridState: LazyGridState = rememberLazyGridState(),
+    persistedColumnCount: Int = 0,
+    onColumnCountChange: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
     if (!PermissionState.hasVideoPermission(context)) {
@@ -71,9 +73,9 @@ fun VideoGridScreen(
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val defaultCols = if (configuration.screenWidthDp >= 840) 6 else if (isLandscape) 5 else 4
+    val defaultCols = if (persistedColumnCount in 2..12) persistedColumnCount else if (configuration.screenWidthDp >= 840) 6 else if (isLandscape) 5 else 4
 
-    var baseColumns by rememberSaveable { mutableIntStateOf(defaultCols) }
+    var baseColumns by rememberSaveable(persistedColumnCount) { mutableIntStateOf(defaultCols) }
     var columnScaleFactor by remember { mutableFloatStateOf(1f) }
     val currentColumns = (baseColumns / columnScaleFactor).roundToInt().coerceIn(2, 12)
 
@@ -159,6 +161,7 @@ fun VideoGridScreen(
                             val targetCols = (baseColumns / columnScaleFactor).roundToInt().coerceIn(2, 12)
                             baseColumns = targetCols
                             columnScaleFactor = 1f
+                            onColumnCountChange(targetCols)
                         }
                     }
                 }
