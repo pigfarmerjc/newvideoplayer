@@ -310,7 +310,6 @@ fun PlayerScreen(
 
     LaunchedEffect(videoUri) {
         isFirstFrameReady = false
-        dragOffsetY = 0f
     }
 
     LaunchedEffect(state, position, diagnostics.uri, videoUri) {
@@ -353,72 +352,14 @@ fun PlayerScreen(
         }
     }
 
-    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
-    val dismissProgress = if (screenHeightPx > 0f) (dragOffsetY / screenHeightPx).coerceIn(0f, 1f) else 0f
-    val dismissScale = (1f - dismissProgress * 0.22f).coerceIn(0.75f, 1f)
-    val bgAlpha = if (dragOffsetY > 0f) (1f - (dragOffsetY / (screenHeightPx * 0.55f))).coerceIn(0f, 1f) else 1f
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = bgAlpha))
-            .pointerInput(Unit) {
-                var velocityTracker = VelocityTracker()
-                detectDragGestures(
-                    onDragStart = {
-                        dragOffsetY = 0f
-                        velocityTracker = VelocityTracker()
-                    },
-                    onDrag = { change, dragAmount ->
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
-                        if (dragAmount.y > 0f || dragOffsetY > 0f) {
-                            if (abs(dragAmount.y) > abs(dragAmount.x) || dragOffsetY > 0f) {
-                                dragOffsetY = (dragOffsetY + dragAmount.y).coerceAtLeast(0f)
-                                if (dragOffsetY > 0f) {
-                                    change.consume()
-                                }
-                            }
-                        }
-                    },
-                    onDragEnd = {
-                        val velocityY = velocityTracker.calculateVelocity().y
-                        if (dragOffsetY > 110.dp.toPx() || velocityY > 800f) {
-                            coroutineScope.launch {
-                                Animatable(dragOffsetY).animateTo(screenHeightPx, tween(180, easing = FastOutSlowInEasing)) {
-                                    dragOffsetY = value
-                                }
-                                saveProgressAndStop()
-                                onBack()
-                            }
-                        } else {
-                            coroutineScope.launch {
-                                Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
-                                    dragOffsetY = value
-                                }
-                            }
-                        }
-                    },
-                    onDragCancel = {
-                        coroutineScope.launch {
-                            Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
-                                dragOffsetY = value
-                            }
-                        }
-                    }
-                )
-            }
+            .background(Color.Black)
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    translationY = dragOffsetY
-                    scaleX = dismissScale
-                    scaleY = dismissScale
-                    clip = dismissProgress > 0.005f
-                    shape = RoundedCornerShape((28f * (dismissProgress * 2.5f).coerceIn(0f, 1f)).dp)
-                },
+            modifier = Modifier.fillMaxSize(),
             pageSpacing = 16.dp,
             beyondViewportPageCount = 1
         ) { page ->
@@ -428,7 +369,42 @@ fun PlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black),
+                    .background(Color.Black)
+                    .pointerInput(speed, skipSeconds, currentSpeed) {
+                        detectTapGestures(
+                            onTap = {
+                                controlsVisible = !controlsVisible
+                            },
+                            onDoubleTap = { offset ->
+                                val currentPos = playbackEngine.positionMs.value
+                                val dur = playbackEngine.durationMs.value
+                                if (dur <= 0L) return@detectTapGestures
+                                val isLeft = offset.x < size.width / 2
+                                val skipOffset = skipSeconds * 1000L
+                                if (isLeft) {
+                                    playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
+                                    activeDoubleTapSide = DoubleTapSide.LEFT
+                                } else {
+                                    playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
+                                    activeDoubleTapSide = DoubleTapSide.RIGHT
+                                }
+                                feedbackJob?.cancel()
+                                feedbackJob = coroutineScope.launch {
+                                    delay(600)
+                                    activeDoubleTapSide = null
+                                }
+                            },
+                            onLongPress = {
+                                coroutineScope.launch {
+                                    isHoldingSpeed = true
+                                    playbackEngine.setSpeed(2.0f)
+                                    delay(2000)
+                                    isHoldingSpeed = false
+                                    playbackEngine.setSpeed(currentSpeed)
+                                }
+                            }
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 // High-resolution static thumbnail poster (ALWAYS rendered on each page)
@@ -451,6 +427,8 @@ fun PlayerScreen(
                             val host = videoOutputFactory.create(ctx)
                             playbackEngine.attachVideoOutput(host)
                             host.view.apply {
+                                isClickable = false
+                                isFocusable = false
                                 post {
                                     videoHost = host
                                 }
@@ -492,53 +470,6 @@ fun PlayerScreen(
                 }
             }
         }
-
-        // Gesture Overlay Detector Area
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(speed, skipSeconds, currentSpeed) {
-                    detectTapGestures(
-                        onTap = {
-                            controlsVisible = !controlsVisible
-                        },
-                        onDoubleTap = { offset ->
-                            val currentPos = playbackEngine.positionMs.value
-                            val dur = playbackEngine.durationMs.value
-                            if (dur <= 0L) return@detectTapGestures
-                            val isLeft = offset.x < size.width / 2
-                            val skipOffset = skipSeconds * 1000L
-                            if (isLeft) {
-                                playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
-                                activeDoubleTapSide = DoubleTapSide.LEFT
-                            } else {
-                                playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
-                                activeDoubleTapSide = DoubleTapSide.RIGHT
-                            }
-                            feedbackJob?.cancel()
-                            feedbackJob = coroutineScope.launch {
-                                delay(600)
-                                activeDoubleTapSide = null
-                            }
-                        },
-                        onPress = {
-                            var isLongPress = false
-                            val job = coroutineScope.launch {
-                                delay(400)
-                                isLongPress = true
-                                isHoldingSpeed = true
-                                playbackEngine.setSpeed(2.0f)
-                            }
-                            tryAwaitRelease()
-                            job.cancel()
-                            if (isLongPress) {
-                                isHoldingSpeed = false
-                                playbackEngine.setSpeed(currentSpeed)
-                            }
-                        }
-                    )
-                }
-        )
 
         // Double-Tap Left Rewind Indicator (Clean icon with drop shadow, no black card)
         AnimatedVisibility(
