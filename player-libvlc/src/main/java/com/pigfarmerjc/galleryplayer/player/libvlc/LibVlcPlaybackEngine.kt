@@ -141,6 +141,7 @@ open class LibVlcPlaybackEngine protected constructor(
                         closeCurrentSource(resetStateToIdle = false)
                         currentUri = uri
                         tryToLoadMedia(uri, SourceStrategy.FILE_DESCRIPTOR)
+                        mediaPlayer?.play()
                         return
                     }
                 }
@@ -369,7 +370,8 @@ open class LibVlcPlaybackEngine protected constructor(
         _durationMs.value = 0L
         _videoSize.value = null
         hasRetriedForCurrentUri = false
-        tryToLoadMedia(uri, SourceStrategy.DIRECT_URI)
+        val initialStrategy = if (uri.scheme == "content") SourceStrategy.FILE_DESCRIPTOR else SourceStrategy.DIRECT_URI
+        tryToLoadMedia(uri, initialStrategy)
     }
 
     private fun tryToLoadMedia(uri: Uri, strategy: SourceStrategy) {
@@ -402,12 +404,13 @@ open class LibVlcPlaybackEngine protected constructor(
             updateDiagnostics(playbackStrategy = strategy.name)
         } catch (e: Exception) {
             Log.e("LibVlcPlaybackEngine", "Error loading media with strategy $strategy: ${e.message}", e)
-            if (strategy == SourceStrategy.DIRECT_URI && !hasRetriedForCurrentUri) {
+            val fallbackStrategy = if (strategy == SourceStrategy.FILE_DESCRIPTOR) SourceStrategy.DIRECT_URI else SourceStrategy.FILE_DESCRIPTOR
+            if (!hasRetriedForCurrentUri) {
                 hasRetriedForCurrentUri = true
-                updateDiagnostics(lastError = "Direct URI failed: ${e.localizedMessage}. Retrying with FD.")
+                updateDiagnostics(lastError = "$strategy failed: ${e.localizedMessage}. Retrying with $fallbackStrategy.")
                 closeCurrentSource(resetStateToIdle = false)
                 currentUri = uri
-                tryToLoadMedia(uri, SourceStrategy.FILE_DESCRIPTOR)
+                tryToLoadMedia(uri, fallbackStrategy)
             } else {
                 updateDiagnostics(lastError = "Failed to open media: ${e.localizedMessage}")
                 closeCurrentSource(resetStateToIdle = false)

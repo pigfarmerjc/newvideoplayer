@@ -12,6 +12,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -56,6 +58,8 @@ private fun Context.findActivity(): ComponentActivity? {
     return null
 }
 
+enum class DoubleTapSide { LEFT, RIGHT }
+
 @Composable
 fun PlayerScreen(
     videoUri: String,
@@ -88,6 +92,7 @@ fun PlayerScreen(
     val diagnostics by playbackEngine.diagnostics.collectAsState()
     val audioTracks by playbackEngine.audioTracks.collectAsState()
     val subtitleTracks by playbackEngine.subtitleTracks.collectAsState()
+    val videoSize by playbackEngine.videoSize.collectAsState()
 
     var controlsVisible by remember { mutableStateOf(true) }
     var speedExpanded by remember { mutableStateOf(false) }
@@ -102,8 +107,8 @@ fun PlayerScreen(
     var hasAppliedDefaultSpeed by remember(videoUri) { mutableStateOf(false) }
     var isHoldingSpeed by remember { mutableStateOf(false) }
 
-    // Double-tap visual feedback state (isLeft, seconds)
-    var doubleTapFeedback by remember { mutableStateOf<Pair<Boolean, Int>?>(null) }
+    // Double-tap visual feedback state (LEFT / RIGHT)
+    var activeDoubleTapSide by remember { mutableStateOf<DoubleTapSide?>(null) }
     var feedbackJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     // Keep track of the active video output host
@@ -127,14 +132,18 @@ fun PlayerScreen(
     val verticalThresholdPx = remember { with(density) { 140.dp.toPx() } }
     val lockThresholdPx = remember { with(density) { 10.dp.toPx() } }
 
-    // Safe save helper
-    val saveProgressAndStop = {
+    // Safe save helpers
+    val saveProgress = {
         val currentPos = playbackEngine.positionMs.value
         val dur = playbackEngine.durationMs.value
         if (dur > 0) {
             val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
             onPlaybackProgress(currentPos, dur, isFinished)
         }
+    }
+
+    val saveProgressAndStop = {
+        saveProgress()
         playbackEngine.stop()
     }
 
@@ -280,8 +289,12 @@ fun PlayerScreen(
     // Track when the active video has decoded its first frame and started playing
     var isFirstFrameReady by remember(videoUri) { mutableStateOf(false) }
 
-    LaunchedEffect(state, position) {
-        if (state == PlaybackState.Playing && position > 20L) {
+    LaunchedEffect(videoUri) {
+        isFirstFrameReady = false
+    }
+
+    LaunchedEffect(state, position, videoSize) {
+        if (state == PlaybackState.Playing && position >= 80L && videoSize != null) {
             isFirstFrameReady = true
         }
     }
@@ -361,9 +374,12 @@ fun PlayerScreen(
             AndroidView(
                 factory = { ctx ->
                     val host = videoOutputFactory.create(ctx)
-                    videoHost = host
                     playbackEngine.attachVideoOutput(host)
-                    host.view
+                    host.view.apply {
+                        post {
+                            videoHost = host
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxSize(),
                 onRelease = {
@@ -462,14 +478,15 @@ fun PlayerScreen(
                             val skipOffset = skipSeconds * 1000L
                             if (isLeft) {
                                 playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
+                                activeDoubleTapSide = DoubleTapSide.LEFT
                             } else {
                                 playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
+                                activeDoubleTapSide = DoubleTapSide.RIGHT
                             }
                             feedbackJob?.cancel()
-                            doubleTapFeedback = Pair(isLeft, skipSeconds)
                             feedbackJob = coroutineScope.launch {
-                                delay(650)
-                                doubleTapFeedback = null
+                                delay(600)
+                                activeDoubleTapSide = null
                             }
                         },
                         onPress = {
@@ -551,7 +568,7 @@ fun PlayerScreen(
                                         val targetX = size.width.toFloat() + 16.dp.toPx()
                                         val anim = Animatable(dragOffsetX)
                                         anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
-                                        saveProgressAndStop()
+                                        saveProgress()
                                         onChangeVideo(currentIndex - 1)
                                         dragOffsetX = 0f
                                         dragDirection = DragDirection.Undecided
@@ -565,7 +582,7 @@ fun PlayerScreen(
                                         val targetX = -size.width.toFloat() - 16.dp.toPx()
                                         val anim = Animatable(dragOffsetX)
                                         anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
-                                        saveProgressAndStop()
+                                        saveProgress()
                                         onChangeVideo(currentIndex + 1)
                                         dragOffsetX = 0f
                                         dragDirection = DragDirection.Undecided
@@ -629,38 +646,69 @@ fun PlayerScreen(
                 }
         )
 
-        // Double-Tap Seek Feedback Overlay Indicator
+        // Double-Tap Left Rewind Indicator (Clean icon with drop shadow, no black card)
         AnimatedVisibility(
-            visible = doubleTapFeedback != null,
-            enter = fadeIn(tween(100)),
-            exit = fadeOut(tween(250)),
+            visible = activeDoubleTapSide == DoubleTapSide.LEFT,
+            enter = fadeIn(tween(80)) + scaleIn(initialScale = 0.82f),
+            exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.82f),
             modifier = Modifier
-                .align(if (doubleTapFeedback?.first == true) Alignment.CenterStart else Alignment.CenterEnd)
-                .padding(horizontal = 48.dp)
+                .align(Alignment.CenterStart)
+                .padding(start = 72.dp)
         ) {
-            val isLeft = doubleTapFeedback?.first == true
-            val secs = doubleTapFeedback?.second ?: skipSeconds
-            Surface(
-                color = Color.Black.copy(alpha = 0.72f),
-                shape = RoundedCornerShape(24.dp)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        if (isLeft) Icons.Filled.FastRewind else Icons.Filled.FastForward,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(32.dp)
+                Icon(
+                    Icons.Filled.FastRewind,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(52.dp)
+                )
+                Text(
+                    text = "-${skipSeconds}s",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black.copy(alpha = 0.8f),
+                            blurRadius = 10f
+                        )
                     )
-                    Text(
-                        text = if (isLeft) "-${secs}秒" else "+${secs}秒",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
+
+        // Double-Tap Right Fast-Forward Indicator (Clean icon with drop shadow, no black card)
+        AnimatedVisibility(
+            visible = activeDoubleTapSide == DoubleTapSide.RIGHT,
+            enter = fadeIn(tween(80)) + scaleIn(initialScale = 0.82f),
+            exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.82f),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 72.dp)
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    Icons.Filled.FastForward,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(52.dp)
+                )
+                Text(
+                    text = "+${skipSeconds}s",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black.copy(alpha = 0.8f),
+                            blurRadius = 10f
+                        )
                     )
-                }
+                )
             }
         }
 
