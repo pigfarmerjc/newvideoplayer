@@ -318,17 +318,15 @@ fun PlayerScreen(
         isFirstFrameReady = false
     }
 
-    LaunchedEffect(state, position, diagnostics.uri, videoUri) {
-        // Primary trigger: playing with a known position (works for video and audio)
-        if (diagnostics.uri == videoUri && state == PlaybackState.Playing && position >= 60L) {
+    LaunchedEffect(state, position, videoSize, videoUri) {
+        if (state == PlaybackState.Playing || position > 0L || videoSize != null) {
             isFirstFrameReady = true
         }
     }
 
-    // Fallback: if the video never reaches Playing (e.g. starts paused, or pure audio),
-    // reveal the surface after a short timeout to avoid permanently hiding the player view.
+    // Fast fallback: reveal the surface after a short timeout so user never gets stuck on black screen
     LaunchedEffect(videoUri) {
-        kotlinx.coroutines.delay(2500L)
+        kotlinx.coroutines.delay(800L)
         isFirstFrameReady = true
     }
 
@@ -532,11 +530,13 @@ fun PlayerScreen(
                                 }
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                alpha = if (isFirstFrameReady) 1f else 0f
-                            },
+                        update = { _ ->
+                            val host = videoHost
+                            if (host != null) {
+                                playbackEngine.attachVideoOutput(host)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
                         onRelease = {
                             playbackEngine.detachVideoOutput()
                             videoHost?.dispose()
