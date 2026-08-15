@@ -293,8 +293,8 @@ fun PlayerScreen(
         isFirstFrameReady = false
     }
 
-    LaunchedEffect(state, position, videoSize) {
-        if (state == PlaybackState.Playing && position >= 80L && videoSize != null) {
+    LaunchedEffect(state, position, videoSize, diagnostics.uri, videoUri) {
+        if (diagnostics.uri == videoUri && state == PlaybackState.Playing && position >= 60L && videoSize != null) {
             isFirstFrameReady = true
         }
     }

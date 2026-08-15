@@ -2,6 +2,7 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -74,6 +75,52 @@ object ThumbnailLoader {
     private val decodeSlots = Semaphore(permits = 3)
     private val decodeDispatcher = Dispatchers.IO.limitedParallelism(3)
 
+    private fun extractVideoFrameFallback(
+        context: Context,
+        uri: Uri,
+        targetWidth: Int,
+        targetHeight: Int
+    ): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (uri.scheme == "content") {
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    retriever.setDataSource(pfd.fileDescriptor)
+                } ?: run {
+                    retriever.setDataSource(context, uri)
+                }
+            } else if (uri.scheme == "file") {
+                retriever.setDataSource(uri.path)
+            } else {
+                retriever.setDataSource(context, uri)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && targetWidth > 0 && targetHeight > 0) {
+                retriever.getScaledFrameAtTime(
+                    1_000_000L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    targetWidth,
+                    targetHeight
+                ) ?: retriever.getScaledFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    targetWidth,
+                    targetHeight
+                ) ?: retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                  ?: retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } else {
+                retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        } catch (e: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {}
+        }
+    }
+
     suspend fun loadMediaThumbnail(
         context: Context,
         contentUri: String,
@@ -93,26 +140,39 @@ object ThumbnailLoader {
         return@withContext decodeSlots.withPermit {
             try {
                 val uri = Uri.parse(contentUri)
-                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    context.contentResolver.loadThumbnail(uri, Size(decodeWidth, decodeHeight), null)
+                var bitmap: Bitmap? = null
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        bitmap = context.contentResolver.loadThumbnail(uri, Size(decodeWidth, decodeHeight), null)
+                    } catch (e: Exception) {
+                        bitmap = null
+                    }
                 } else {
-                    val id = uri.lastPathSegment?.toLongOrNull() ?: return@withPermit null
-                    if (mediaType == MediaType.VIDEO) {
-                        MediaStore.Video.Thumbnails.getThumbnail(
-                            context.contentResolver,
-                            id,
-                            MediaStore.Video.Thumbnails.MINI_KIND,
-                            null
-                        )
-                    } else {
-                        MediaStore.Images.Thumbnails.getThumbnail(
-                            context.contentResolver,
-                            id,
-                            MediaStore.Images.Thumbnails.MINI_KIND,
-                            null
-                        )
+                    val id = uri.lastPathSegment?.toLongOrNull()
+                    if (id != null) {
+                        bitmap = if (mediaType == MediaType.VIDEO) {
+                            MediaStore.Video.Thumbnails.getThumbnail(
+                                context.contentResolver,
+                                id,
+                                MediaStore.Video.Thumbnails.MINI_KIND,
+                                null
+                            )
+                        } else {
+                            MediaStore.Images.Thumbnails.getThumbnail(
+                                context.contentResolver,
+                                id,
+                                MediaStore.Images.Thumbnails.MINI_KIND,
+                                null
+                            )
+                        }
                     }
                 }
+
+                // If MediaStore thumbnail failed or returned null for video, extract frame via MediaMetadataRetriever
+                if (bitmap == null && mediaType == MediaType.VIDEO) {
+                    bitmap = extractVideoFrameFallback(context, uri, decodeWidth, decodeHeight)
+                }
+
                 if (bitmap != null) ThumbnailCache.put(cacheKey, bitmap)
                 bitmap
             } catch (e: Exception) {

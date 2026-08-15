@@ -309,6 +309,7 @@ open class LibVlcPlaybackEngine protected constructor(
     }
 
     private fun updateDiagnostics(
+        uri: String? = null,
         mimeType: String? = null,
         durationMs: Long? = null,
         width: Int? = null,
@@ -324,7 +325,7 @@ open class LibVlcPlaybackEngine protected constructor(
     ) {
         val currentDiag = _diagnostics.value
         _diagnostics.value = currentDiag.copy(
-            uri = currentUri?.toString() ?: currentDiag.uri,
+            uri = uri ?: currentUri?.toString() ?: currentDiag.uri,
             mimeType = mimeType ?: currentDiag.mimeType,
             durationMs = durationMs ?: currentDiag.durationMs,
             width = width ?: currentDiag.width,
@@ -354,9 +355,12 @@ open class LibVlcPlaybackEngine protected constructor(
             if (resetStateToIdle && _playbackState.value != PlaybackState.Error && _playbackState.value != PlaybackState.Released) {
                 _playbackState.value = PlaybackState.Idle
             }
+            _positionMs.value = 0L
+            _durationMs.value = 0L
             _videoSize.value = null
             _audioTracks.value = emptyList()
             _subtitleTracks.value = emptyList()
+            updateDiagnostics(uri = "", libvlcEvent = "SourceClosed", width = 0, height = 0)
         } finally {
             isClosingSource = false
         }
@@ -370,6 +374,7 @@ open class LibVlcPlaybackEngine protected constructor(
         _durationMs.value = 0L
         _videoSize.value = null
         hasRetriedForCurrentUri = false
+        updateDiagnostics(uri = uri.toString(), libvlcEvent = "Opening", width = 0, height = 0)
         val initialStrategy = if (uri.scheme == "content") SourceStrategy.FILE_DESCRIPTOR else SourceStrategy.DIRECT_URI
         tryToLoadMedia(uri, initialStrategy)
     }
