@@ -702,20 +702,21 @@ class MainActivity : ComponentActivity() {
                                     videoOutputFactory = viewModel.videoOutputFactory,
                                     onChangeVideo = { newIndex ->
                                         val newItem = activePlayer.videoList[newIndex]
+                                        val pIdx = screenStack.indexOfLast { it is Screen.Player }
+                                        if (pIdx >= 0) {
+                                            screenStack[pIdx] = Screen.Player(
+                                                videoUri = newItem.contentUri,
+                                                videoTitle = newItem.displayName,
+                                                videoList = activePlayer.videoList,
+                                                currentIndex = newIndex,
+                                                initialPositionMs = 0L
+                                            )
+                                        }
                                         scope.launch {
                                             val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
                                             if (resumePos > 0L) {
+                                                viewModel.playbackEngine.seekTo(resumePos)
                                                 android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                            val pIdx = screenStack.indexOfLast { it is Screen.Player }
-                                            if (pIdx >= 0) {
-                                                screenStack[pIdx] = Screen.Player(
-                                                    videoUri = newItem.contentUri,
-                                                    videoTitle = newItem.displayName,
-                                                    videoList = activePlayer.videoList,
-                                                    currentIndex = newIndex,
-                                                    initialPositionMs = resumePos
-                                                )
                                             }
                                         }
                                     },

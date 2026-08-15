@@ -289,6 +289,12 @@ fun PlayerScreen(
 
     LaunchedEffect(videoUri) {
         isFirstFrameReady = false
+        dragOffsetX = 0f
+        dragOffsetY = 0f
+        dragDirection = DragDirection.Undecided
+        gestureSettling = false
+        settleJob?.cancel()
+        settleJob = null
     }
 
     LaunchedEffect(state, position, diagnostics.uri, videoUri) {
@@ -584,10 +590,6 @@ fun PlayerScreen(
                                         anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
                                         saveProgress()
                                         onChangeVideo(currentIndex - 1)
-                                        dragOffsetX = 0f
-                                        dragDirection = DragDirection.Undecided
-                                        gestureSettling = false
-                                        settleJob = null
                                     }
                                 }
                                 PlayerDragAction.Next -> {
@@ -598,10 +600,6 @@ fun PlayerScreen(
                                         anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
                                         saveProgress()
                                         onChangeVideo(currentIndex + 1)
-                                        dragOffsetX = 0f
-                                        dragDirection = DragDirection.Undecided
-                                        gestureSettling = false
-                                        settleJob = null
                                     }
                                 }
                                 PlayerDragAction.Dismiss -> {
