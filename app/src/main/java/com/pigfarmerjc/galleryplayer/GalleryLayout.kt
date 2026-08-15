@@ -39,10 +39,16 @@ object GalleryLayout {
     }
 
     fun is4K(width: Int, height: Int): Boolean {
-        return width >= 3840 || height >= 2160 || (width >= 2160 && height >= 3840)
+        // Use the longer and shorter side to correctly handle both landscape and portrait video.
+        // A true 4K frame must have its longer edge >= 3840 AND shorter edge >= 2160.
+        val maxDim = maxOf(width, height)
+        val minDim = minOf(width, height)
+        return maxDim >= 3840 && minDim >= 2160
     }
 
     fun isHD(width: Int, height: Int): Boolean {
-        return (width in 1280..3839 || height in 720..2159) && !is4K(width, height)
+        val maxDim = maxOf(width, height)
+        val minDim = minOf(width, height)
+        return maxDim >= 1280 && minDim >= 720 && !is4K(width, height)
     }
 }

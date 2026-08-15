@@ -222,15 +222,15 @@ abstract class GalleryDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): GalleryDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                // Re-check inside lock to prevent two threads both creating an instance
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     GalleryDatabase::class.java,
                     DB_NAME
                 )
                 .addMigrations(MIGRATION_1_2)
                 .build()
-                INSTANCE = instance
-                instance
+                .also { INSTANCE = it }
             }
         }
     }

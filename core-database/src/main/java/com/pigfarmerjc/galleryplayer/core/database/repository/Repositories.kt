@@ -16,7 +16,8 @@ import kotlinx.coroutines.flow.map
 fun MediaItemEntity.toDomain(): MediaItem = MediaItem(
     databaseId = id,
     contentUri = contentUri,
-    mediaType = MediaType.valueOf(mediaType),
+    // Safe enum parsing: unknown stored values fall back to VIDEO to prevent crashes
+    mediaType = MediaType.entries.find { it.name == mediaType } ?: MediaType.VIDEO,
     volumeName = volumeName,
     mediaStoreId = mediaStoreId,
     relativePath = relativePath,
@@ -41,7 +42,8 @@ fun MediaItemEntity.toDomain(): MediaItem = MediaItem(
     isGif = isGif,
     isFavorite = isFavorite,
     isHidden = isHidden,
-    scanState = ScanState.valueOf(scanState),
+    // Safe enum parsing: unknown stored values fall back to SCANNED
+    scanState = ScanState.entries.find { it.name == scanState } ?: ScanState.SCANNED,
     lastError = lastError
 )
 
@@ -89,6 +91,7 @@ interface MediaRepository {
     suspend fun deleteFolder(volumeName: String, relativePath: String)
     suspend fun saveMediaItems(items: List<MediaItem>)
     suspend fun deleteMediaItem(contentUri: String)
+    suspend fun deleteMediaItems(contentUris: List<String>)
 }
 
 data class PlaybackHistoryItem(
@@ -157,6 +160,14 @@ class RoomMediaRepository(
     override suspend fun deleteMediaItem(contentUri: String) {
         mediaItemDao.deleteByUri(contentUri)
     }
+
+    override suspend fun deleteMediaItems(contentUris: List<String>) {
+        if (contentUris.isEmpty()) return
+        // Delete in chunks to avoid SQLite max variable limits (~999)
+        contentUris.chunked(500).forEach { chunk ->
+            mediaItemDao.deleteByUris(chunk)
+        }
+    }
 }
 
 class RoomPlaybackHistoryRepository(
@@ -196,20 +207,17 @@ class RoomPlaybackHistoryRepository(
         } else {
             finished
         }
+        // Once completed, keep it completed even if user rewinds
+        val isCompleted = (existing?.completed == true) || calculatedFinished
 
-        val newPlayCount = if (existing != null) {
-            existing.playCount + 1
-        } else {
-            1
-        }
-
+        // playCount is ONLY incremented in startPlaybackSession; saveHistory preserves it
         val history = PlaybackHistoryEntity(
             mediaId = mediaItem.id,
             positionMs = positionMs,
             durationMs = durationMs,
             lastPlayedAt = System.currentTimeMillis(),
-            completed = calculatedFinished,
-            playCount = newPlayCount,
+            completed = isCompleted,
+            playCount = existing?.playCount ?: 1,
             preferredSpeed = existing?.preferredSpeed ?: 1.0f
         )
         playbackHistoryDao.upsert(history)
@@ -250,15 +258,18 @@ class RoomPlaybackHistoryRepository(
         } else {
             false
         }
+        // Once completed, keep it completed even if user rewinds
+        val isCompleted = (existing?.completed == true) || calculatedCompleted
 
-        val finalPosition = if (positionMs < 3000L) 0L else positionMs
+        // Only skip saving near-zero positions for long media; short clips (< 10s) always save
+        val finalPosition = if (positionMs < 3000L && durationMs > 10000L) 0L else positionMs
 
         val history = PlaybackHistoryEntity(
             mediaId = mediaItem.id,
             positionMs = finalPosition,
             durationMs = durationMs,
             lastPlayedAt = System.currentTimeMillis(),
-            completed = calculatedCompleted,
+            completed = isCompleted,
             playCount = existing?.playCount ?: 1,
             preferredSpeed = preferredSpeed
         )
@@ -271,7 +282,8 @@ class RoomPlaybackHistoryRepository(
 
         val history = PlaybackHistoryEntity(
             mediaId = mediaItem.id,
-            positionMs = durationMs,
+            // Set positionMs to 0 so next time user opens this video it starts from the beginning
+            positionMs = 0L,
             durationMs = durationMs,
             lastPlayedAt = System.currentTimeMillis(),
             completed = true,

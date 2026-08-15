@@ -383,9 +383,10 @@ private fun PhotosCell(
 private fun buildDateGroupedItems(videos: List<LocalMediaItem>): List<PhotosGridItem> {
     if (videos.isEmpty()) return emptyList()
     val calendar = Calendar.getInstance()
-    val curCalendar = Calendar.getInstance()
-    val curYear = curCalendar.get(Calendar.YEAR)
-    val curDayOfYear = curCalendar.get(Calendar.DAY_OF_YEAR)
+    val nowMs = System.currentTimeMillis()
+    val msPerDay = 24 * 60 * 60 * 1000L
+    // Epoch day of today (truncated to day boundary in local timezone)
+    val todayEpochDay = nowMs / msPerDay
 
     val grouped = linkedMapOf<String, MutableList<LocalMediaItem>>()
 
@@ -400,14 +401,16 @@ private fun buildDateGroupedItems(videos: List<LocalMediaItem>): List<PhotosGrid
             val month = calendar.get(Calendar.MONTH) + 1
             val day = calendar.get(Calendar.DAY_OF_MONTH)
 
-            if (curYear == year && curDayOfYear == calendar.get(Calendar.DAY_OF_YEAR)) {
-                "今天"
-            } else if (curYear == year && curDayOfYear - calendar.get(Calendar.DAY_OF_YEAR) == 1) {
-                "昨天"
-            } else if (curYear == year) {
-                "${month}月${day}日"
-            } else {
-                "${year}年${month}月"
+            // Use epoch day difference to correctly handle cross-year boundaries (e.g. Jan 1 vs Dec 31)
+            val videoEpochDay = dateMs / msPerDay
+            val dayDiff = todayEpochDay - videoEpochDay
+
+            when {
+                dayDiff == 0L -> "今天"
+                dayDiff == 1L -> "昨天"
+                calendar.get(Calendar.YEAR) == Calendar.getInstance().get(Calendar.YEAR) ->
+                    "${month}月${day}日"
+                else -> "${year}年${month}月"
             }
         }
         grouped.getOrPut(label) { mutableListOf() }.add(video)

@@ -28,7 +28,10 @@ object PlayerGestureState {
     ): PlayerDragAction {
         val absX = abs(dragOffsetX)
         val absY = abs(dragOffsetY)
-        val horizontalFlick = abs(velocityX) >= 700f && absX >= horizontalThresholdPx * 0.15f
+        // A flick only overrides position-based direction when velocity and displacement agree on direction.
+        // This prevents a brief reverse-velocity finger lift from flipping the navigation intent.
+        val horizontalFlick = abs(velocityX) >= 700f && absX >= horizontalThresholdPx * 0.15f &&
+                (velocityX * dragOffsetX > 0f) // velocity and displacement must point the same way
         val downwardFlick = velocityY >= 800f && dragOffsetY >= verticalThresholdPx * 0.15f
 
         // Horizontal dominant

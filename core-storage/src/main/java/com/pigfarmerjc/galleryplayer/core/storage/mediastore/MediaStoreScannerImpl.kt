@@ -74,12 +74,19 @@ class MediaStoreScannerImpl(private val context: Context) : MediaStoreScanner {
             currentCoroutineContext().ensureActive()
             
             val projection = getProjectionForType(mediaTypeCategory)
+
+            // Filter out files currently being recorded (IS_PENDING) or in trash (IS_TRASHED) on API 29+
+            val selection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                "${MediaStore.MediaColumns.IS_PENDING} = 0 AND ${MediaStore.MediaColumns.IS_TRASHED} = 0"
+            } else {
+                null
+            }
             
             try {
                 context.contentResolver.query(
                     contentTableUri,
                     projection,
-                    null,
+                    selection,
                     null,
                     null
                 )?.use { cursor ->

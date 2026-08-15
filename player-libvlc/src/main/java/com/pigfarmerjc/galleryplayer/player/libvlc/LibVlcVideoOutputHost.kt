@@ -10,23 +10,25 @@ class LibVlcVideoOutputHost(context: Context) : VideoOutputHost {
     // Keep VLCVideoLayout with proper Activity/UI context so it has window metrics for aspect ratio calculation
     private var vlcVideoLayout: VLCVideoLayout? = VLCVideoLayout(context)
     
-    // Explicit disposed state tracking
-    private var isDisposed = false
+    // Keep a reference even after dispose so Compose can safely finish unbinding the view
+    private var lastKnownView: VLCVideoLayout? = null
 
     override val view: View
         get() {
-            if (isDisposed) {
-                throw IllegalStateException("LibVlcVideoOutputHost is already disposed")
-            }
-            return vlcVideoLayout ?: throw IllegalStateException("LibVlcVideoOutputHost is null")
+            // After dispose, return the last known view rather than throwing.
+            // Compose (or AccessibilityService) may read .view one final time during teardown;
+            // throwing here causes an unhandled crash.
+            return vlcVideoLayout ?: lastKnownView
+                ?: throw IllegalStateException("LibVlcVideoOutputHost: view was never initialized")
         }
 
     val vlcLayout: VLCVideoLayout?
         get() = vlcVideoLayout
 
     override fun dispose() {
-        if (isDisposed) return
-        isDisposed = true
+        if (vlcVideoLayout == null) return // already disposed
+
+        lastKnownView = vlcVideoLayout
 
         vlcVideoLayout?.let { layout ->
             (layout.parent as? android.view.ViewGroup)?.removeView(layout)

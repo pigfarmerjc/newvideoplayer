@@ -131,12 +131,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         favoriteUris = favPrefs.getStringSet("favorite_uris", emptySet())?.toSet() ?: emptySet()
 
         val sortPrefs = application.getSharedPreferences("library_sort_settings", android.content.Context.MODE_PRIVATE)
-        videoSortMode = VideoSortMode.valueOf(sortPrefs.getString("video_sort_mode", VideoSortMode.DATE_MODIFIED_DESC.name) ?: VideoSortMode.DATE_MODIFIED_DESC.name)
-        folderSortMode = FolderSortMode.valueOf(sortPrefs.getString("folder_sort_mode", FolderSortMode.VIDEO_COUNT_DESC.name) ?: FolderSortMode.VIDEO_COUNT_DESC.name)
+        videoSortMode = VideoSortMode.entries.find { it.name == sortPrefs.getString("video_sort_mode", null) } ?: VideoSortMode.DATE_MODIFIED_DESC
+        folderSortMode = FolderSortMode.entries.find { it.name == sortPrefs.getString("folder_sort_mode", null) } ?: FolderSortMode.VIDEO_COUNT_DESC
 
         val playbackPrefs = application.getSharedPreferences("playback_settings", android.content.Context.MODE_PRIVATE)
-        repeatModeState = PlaybackRepeatMode.valueOf(playbackPrefs.getString("repeat_mode", PlaybackRepeatMode.NONE.name) ?: PlaybackRepeatMode.NONE.name)
-        decoderModeState = DecoderMode.valueOf(playbackPrefs.getString("decoder_mode", DecoderMode.AUTO.name) ?: DecoderMode.AUTO.name)
+        repeatModeState = PlaybackRepeatMode.entries.find { it.name == playbackPrefs.getString("repeat_mode", null) } ?: PlaybackRepeatMode.NONE
+        decoderModeState = DecoderMode.entries.find { it.name == playbackPrefs.getString("decoder_mode", null) } ?: DecoderMode.AUTO
         playbackEngine.setDecoderMode(decoderModeState)
 
         val safPrefs = application.getSharedPreferences("saf_settings", android.content.Context.MODE_PRIVATE)

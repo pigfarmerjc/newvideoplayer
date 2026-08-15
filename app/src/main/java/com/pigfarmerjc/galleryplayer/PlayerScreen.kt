@@ -230,11 +230,9 @@ fun PlayerScreen(
                     saveProgressAndStop()
                 }
                 PlaybackRepeatMode.ONE -> {
-                    // Repeat current video: seek to 0 and play again.
-                    // This does not change the videoUri, so hasStartedSession remains true
-                    // and duplicate playCount additions are blocked.
-                    playbackEngine.seekTo(0L)
-                    playbackEngine.play()
+                    // After Ended, LibVLC marks the media as non-seekable.
+                    // Re-open the same URI to restart from the beginning instead of seeking.
+                    playbackEngine.open(android.net.Uri.parse(videoUri))
                 }
                 PlaybackRepeatMode.ALL -> {
                     saveProgressAndStop()
@@ -293,20 +291,18 @@ fun PlayerScreen(
         isFirstFrameReady = false
     }
 
-    LaunchedEffect(state, position, videoSize, diagnostics.uri, videoUri) {
-        if (diagnostics.uri == videoUri && state == PlaybackState.Playing && position >= 60L && videoSize != null) {
+    LaunchedEffect(state, position, diagnostics.uri, videoUri) {
+        // Primary trigger: playing with a known position (works for video and audio)
+        if (diagnostics.uri == videoUri && state == PlaybackState.Playing && position >= 60L) {
             isFirstFrameReady = true
         }
     }
 
-    // Sync Android view visibility with isFirstFrameReady so that:
-    // - When switching videos the view is immediately INVISIBLE (hides the last decoded frame of the old video)
-    // - Once the new video's first frame is confirmed ready the view becomes VISIBLE again
-    // The graphicsLayer alpha=0 alone is a Compose draw-layer effect and does NOT prevent the Surface
-    // from rendering stale VLC frames; we need the actual View visibility flag as well.
-    LaunchedEffect(isFirstFrameReady, videoHost) {
-        val view = videoHost?.view ?: return@LaunchedEffect
-        view.visibility = if (isFirstFrameReady) android.view.View.VISIBLE else android.view.View.INVISIBLE
+    // Fallback: if the video never reaches Playing (e.g. starts paused, or pure audio),
+    // reveal the surface after a short timeout to avoid permanently hiding the player view.
+    LaunchedEffect(videoUri) {
+        kotlinx.coroutines.delay(2500L)
+        isFirstFrameReady = true
     }
 
     // Preload next and previous video thumbnails in background for instantaneous zero-latency swipe previews
@@ -488,6 +484,8 @@ fun PlayerScreen(
                         onDoubleTap = { offset ->
                             val currentPos = playbackEngine.positionMs.value
                             val dur = playbackEngine.durationMs.value
+                            // Guard: if duration is unknown (0), seeking is meaningless and would jump to 0:00
+                            if (dur <= 0L) return@detectTapGestures
                             val isLeft = offset.x < size.width / 2
                             val skipOffset = skipSeconds * 1000L
                             if (isLeft) {
@@ -516,6 +514,8 @@ fun PlayerScreen(
                             if (isLongPress) {
                                 isHoldingSpeed = false
                                 playbackEngine.setSpeed(currentSpeed)
+                                // Consume this release so onTap is NOT triggered after a long-press
+                                // (otherwise the control bar would toggle unexpectedly)
                             }
                         }
                     )
@@ -894,6 +894,18 @@ fun PlayerScreen(
                                 }
                                 if (subtitleTracks.isNotEmpty()) {
                                     DropdownMenuItem(text = { Text("字幕") }, onClick = {}, enabled = false)
+                                    // "Disable subtitles" option — always shown when subtitle tracks are present
+                                    DropdownMenuItem(
+                                        text = { Text("关闭字幕") },
+                                        leadingIcon = {
+                                            if (subtitleTracks.none { it.selected }) Icon(Icons.Filled.Check, contentDescription = null)
+                                            else Spacer(Modifier.size(24.dp))
+                                        },
+                                        onClick = {
+                                            playbackEngine.selectSubtitleTrack(-1)
+                                            tracksExpanded = false
+                                        }
+                                    )
                                     subtitleTracks.forEach { track ->
                                         DropdownMenuItem(
                                             text = { Text(track.name) },

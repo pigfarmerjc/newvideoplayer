@@ -364,7 +364,9 @@ open class LibVlcPlaybackEngine protected constructor(
             _videoSize.value = null
             _audioTracks.value = emptyList()
             _subtitleTracks.value = emptyList()
-            activeVideoOutput?.view?.visibility = android.view.View.INVISIBLE
+            // Do NOT touch view.visibility here: hiding the Surface interrupts VLC's render
+            // pipeline and causes a visible stutter on the next video. Visual masking is
+            // handled entirely by Compose's graphicsLayer alpha via isFirstFrameReady.
             updateDiagnostics(uri = "", libvlcEvent = "SourceClosed", width = 0, height = 0)
         } finally {
             isClosingSource = false

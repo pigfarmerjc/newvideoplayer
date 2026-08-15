@@ -120,8 +120,9 @@ class StorageSyncManager(
 
         // Deletion Scope: ONLY items associated with this volume that are no longer present in the scan
         val itemsToDelete = dbItems.filter { it.contentUri !in scannedUris }
-        for (item in itemsToDelete) {
-            mediaRepository.deleteMediaItem(item.contentUri)
+        if (itemsToDelete.isNotEmpty()) {
+            // Batch delete in one SQL call instead of N individual transactions
+            mediaRepository.deleteMediaItems(itemsToDelete.map { it.contentUri })
         }
 
         // Batch save new and modified items

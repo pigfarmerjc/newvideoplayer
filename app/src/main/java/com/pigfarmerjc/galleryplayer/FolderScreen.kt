@@ -358,9 +358,8 @@ fun FolderCard(
                         color = MaterialTheme.colorScheme.primary
                     )
                     
-                    val sizeMb = folder.totalSize / (1024L * 1024L)
                     Text(
-                        text = "${sizeMb} MB",
+                        text = GalleryLayout.formatFileSize(folder.totalSize),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )

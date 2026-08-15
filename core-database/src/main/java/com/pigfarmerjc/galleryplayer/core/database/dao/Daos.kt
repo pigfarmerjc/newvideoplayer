@@ -32,7 +32,12 @@ interface MediaItemDao {
     suspend fun upsert(mediaItem: MediaItemEntity): Long {
         val existing = getByUri(mediaItem.contentUri)
         return if (existing != null) {
-            update(mediaItem.copy(id = existing.id))
+            // Preserve user-set flags that scanners don't know about
+            update(mediaItem.copy(
+                id = existing.id,
+                isFavorite = existing.isFavorite,
+                isHidden = existing.isHidden
+            ))
             existing.id
         } else {
             insert(mediaItem)
@@ -43,6 +48,9 @@ interface MediaItemDao {
     suspend fun upsertAll(mediaItems: List<MediaItemEntity>) {
         mediaItems.forEach { upsert(it) }
     }
+
+    @Query("DELETE FROM media_items WHERE content_uri IN (:contentUris)")
+    suspend fun deleteByUris(contentUris: List<String>)
 
     @Query("DELETE FROM media_items WHERE content_uri = :contentUri")
     suspend fun deleteByUri(contentUri: String)
@@ -93,7 +101,12 @@ interface FolderDao {
     suspend fun upsert(folder: FolderEntity): Long {
         val existing = getByVolumeAndPath(folder.volumeName, folder.relativePath)
         return if (existing != null) {
-            update(folder.copy(folderId = existing.folderId))
+            // Preserve user-set flags that folder recalculation doesn't know about
+            update(folder.copy(
+                folderId = existing.folderId,
+                isFavorite = existing.isFavorite,
+                isHidden = existing.isHidden
+            ))
             existing.folderId
         } else {
             insert(folder)

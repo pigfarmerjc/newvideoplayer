@@ -62,4 +62,8 @@ class FakeMediaRepository : MediaRepository {
     override suspend fun deleteMediaItem(contentUri: String) {
         mediaItems.remove(contentUri)
     }
+
+    override suspend fun deleteMediaItems(contentUris: List<String>) {
+        contentUris.forEach { mediaItems.remove(it) }
+    }
 }
