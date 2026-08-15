@@ -274,6 +274,41 @@ fun PlayerScreen(
         }
     }
 
+    // Track when the active video has decoded its first frame and started playing
+    var isFirstFrameReady by remember(videoUri) { mutableStateOf(false) }
+
+    LaunchedEffect(state, position) {
+        if (state == PlaybackState.Playing && position > 20L) {
+            isFirstFrameReady = true
+        }
+    }
+
+    // Preload next and previous video thumbnails in background for instantaneous zero-latency swipe previews
+    LaunchedEffect(currentIndex, videoList) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (currentIndex + 1 < videoList.size) {
+                ThumbnailLoader.loadMediaThumbnail(
+                    context,
+                    videoList[currentIndex + 1].contentUri,
+                    MediaType.VIDEO,
+                    1920,
+                    1080,
+                    2048
+                )
+            }
+            if (currentIndex - 1 >= 0) {
+                ThumbnailLoader.loadMediaThumbnail(
+                    context,
+                    videoList[currentIndex - 1].contentUri,
+                    MediaType.VIDEO,
+                    1920,
+                    1080,
+                    2048
+                )
+            }
+        }
+    }
+
     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
@@ -334,6 +369,20 @@ fun PlayerScreen(
                     videoHost = null
                 }
             )
+
+            // Seamless poster overlay: covers until the first frame is playing to eliminate black screen flicker
+            if (!isFirstFrameReady) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                    MediaThumbnail(
+                        contentUri = videoUri,
+                        mediaType = MediaType.VIDEO,
+                        modifier = Modifier.fillMaxSize(),
+                        width = 1920,
+                        height = 1080,
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
         }
 
         // 2. Next Video Side Preview (attached to the right when swiping left)
@@ -633,7 +682,18 @@ fun PlayerScreen(
             }
         }
 
-        if (state == PlaybackState.Opening || state == PlaybackState.Buffering) {
+        // Debounced buffering indicator (only shows if buffering takes longer than 600ms)
+        var showBufferingIndicator by remember(videoUri) { mutableStateOf(false) }
+        LaunchedEffect(state, isFirstFrameReady) {
+            if ((state == PlaybackState.Opening || state == PlaybackState.Buffering) && !isFirstFrameReady) {
+                delay(600)
+                showBufferingIndicator = true
+            } else {
+                showBufferingIndicator = false
+            }
+        }
+
+        if (showBufferingIndicator) {
             CircularProgressIndicator(
                 color = Color.White,
                 modifier = Modifier.align(Alignment.Center).size(38.dp)
