@@ -375,6 +375,112 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = bgAlpha))
+            .pointerInput(speed, skipSeconds, currentSpeed, screenHeightPx, dismissThresholdPx) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downPos = down.position
+                    val downId = down.id
+                    var isHolding = false
+                    var dragAxis = DragAxis.NONE
+                    val velocityTracker = VelocityTracker()
+                    velocityTracker.addPosition(down.uptimeMillis, down.position)
+
+                    val longPressJob = coroutineScope.launch {
+                        delay(400)
+                        if (dragAxis == DragAxis.NONE) {
+                            isHolding = true
+                            isHoldingSpeed = true
+                            playbackEngine.setSpeed(2.0f)
+                        }
+                    }
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pointer = event.changes.firstOrNull { it.id == downId } ?: break
+                        if (!pointer.pressed) {
+                            break
+                        }
+                        velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
+                        val dx = pointer.position.x - downPos.x
+                        val dy = pointer.position.y - downPos.y
+
+                        if (dragAxis == DragAxis.NONE) {
+                            val absX = abs(dx)
+                            val absY = abs(dy)
+                            if (absX > 14f || absY > 14f) {
+                                longPressJob.cancel()
+                                dragAxis = if (absY > absX) DragAxis.VERTICAL else DragAxis.HORIZONTAL
+                            }
+                        }
+
+                        if (dragAxis == DragAxis.VERTICAL) {
+                            longPressJob.cancel()
+                            pointer.consume()
+                            dragOffsetY = dy
+                        }
+                    }
+
+                    longPressJob.cancel()
+                    if (isHolding) {
+                        isHoldingSpeed = false
+                        playbackEngine.setSpeed(currentSpeed)
+                    } else if (dragAxis == DragAxis.VERTICAL) {
+                        val velocityY = velocityTracker.calculateVelocity().y
+                        val absY = abs(dragOffsetY)
+                        val shouldDismiss = absY > dismissThresholdPx || abs(velocityY) > 750f
+                        if (shouldDismiss && absY > 16f) {
+                            val targetY = if (dragOffsetY >= 0) screenHeightPx else -screenHeightPx
+                            coroutineScope.launch {
+                                Animatable(dragOffsetY).animateTo(targetY, tween(180, easing = FastOutSlowInEasing)) {
+                                    dragOffsetY = value
+                                }
+                                saveProgressAndStop()
+                                onBack()
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
+                                    dragOffsetY = value
+                                }
+                            }
+                        }
+                    } else if (dragAxis == DragAxis.NONE) {
+                        val now = SystemClock.uptimeMillis()
+                        if (now - lastTapTime < 280L && (downPos - lastTapOffset).getDistance() < 60.dp.toPx()) {
+                            singleTapJob?.cancel()
+                            singleTapJob = null
+                            lastTapTime = 0L
+                            val currentPos = playbackEngine.positionMs.value
+                            val dur = playbackEngine.durationMs.value
+                            if (dur > 0L) {
+                                val isLeft = downPos.x < size.width / 2f
+                                val skipOffset = skipSeconds * 1000L
+                                if (isLeft) {
+                                    playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
+                                    activeDoubleTapSide = DoubleTapSide.LEFT
+                                } else {
+                                    playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
+                                    activeDoubleTapSide = DoubleTapSide.RIGHT
+                                }
+                                feedbackJob?.cancel()
+                                feedbackJob = coroutineScope.launch {
+                                    delay(600)
+                                    activeDoubleTapSide = null
+                                }
+                            }
+                        } else {
+                            lastTapTime = now
+                            lastTapOffset = downPos
+                            singleTapJob?.cancel()
+                            singleTapJob = coroutineScope.launch {
+                                delay(260)
+                                controlsVisible = !controlsVisible
+                                lastTapTime = 0L
+                            }
+                        }
+                    }
+                }
+            }
     ) {
         HorizontalPager(
             state = pagerState,
@@ -396,113 +502,7 @@ fun PlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black)
-                    .pointerInput(speed, skipSeconds, currentSpeed, screenHeightPx, dismissThresholdPx) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val downPos = down.position
-                            val downId = down.id
-                            var isHolding = false
-                            var dragAxis = DragAxis.NONE
-                            val velocityTracker = VelocityTracker()
-                            velocityTracker.addPosition(down.uptimeMillis, down.position)
-
-                            val longPressJob = coroutineScope.launch {
-                                delay(400)
-                                if (dragAxis == DragAxis.NONE) {
-                                    isHolding = true
-                                    isHoldingSpeed = true
-                                    playbackEngine.setSpeed(2.0f)
-                                }
-                            }
-
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val pointer = event.changes.firstOrNull { it.id == downId } ?: break
-                                if (!pointer.pressed) {
-                                    break
-                                }
-                                velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
-                                val dx = pointer.position.x - downPos.x
-                                val dy = pointer.position.y - downPos.y
-
-                                if (dragAxis == DragAxis.NONE) {
-                                    val absX = abs(dx)
-                                    val absY = abs(dy)
-                                    if (absX > 14f || absY > 14f) {
-                                        longPressJob.cancel()
-                                        dragAxis = if (absY > absX) DragAxis.VERTICAL else DragAxis.HORIZONTAL
-                                    }
-                                }
-
-                                if (dragAxis == DragAxis.VERTICAL) {
-                                    longPressJob.cancel()
-                                    pointer.consume()
-                                    dragOffsetY = dy
-                                }
-                            }
-
-                            longPressJob.cancel()
-                            if (isHolding) {
-                                isHoldingSpeed = false
-                                playbackEngine.setSpeed(currentSpeed)
-                            } else if (dragAxis == DragAxis.VERTICAL) {
-                                val velocityY = velocityTracker.calculateVelocity().y
-                                val absY = abs(dragOffsetY)
-                                val shouldDismiss = absY > dismissThresholdPx || abs(velocityY) > 750f
-                                if (shouldDismiss && absY > 16f) {
-                                    val targetY = if (dragOffsetY >= 0) screenHeightPx else -screenHeightPx
-                                    coroutineScope.launch {
-                                        Animatable(dragOffsetY).animateTo(targetY, tween(180, easing = FastOutSlowInEasing)) {
-                                            dragOffsetY = value
-                                        }
-                                        saveProgressAndStop()
-                                        onBack()
-                                    }
-                                } else {
-                                    coroutineScope.launch {
-                                        Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
-                                            dragOffsetY = value
-                                        }
-                                    }
-                                }
-                            } else if (dragAxis == DragAxis.NONE) {
-                                val now = SystemClock.uptimeMillis()
-                                if (now - lastTapTime < 280L && (downPos - lastTapOffset).getDistance() < 60.dp.toPx()) {
-                                    singleTapJob?.cancel()
-                                    singleTapJob = null
-                                    lastTapTime = 0L
-                                    val currentPos = playbackEngine.positionMs.value
-                                    val dur = playbackEngine.durationMs.value
-                                    if (dur > 0L) {
-                                        val isLeft = downPos.x < size.width / 2f
-                                        val skipOffset = skipSeconds * 1000L
-                                        if (isLeft) {
-                                            playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
-                                            activeDoubleTapSide = DoubleTapSide.LEFT
-                                        } else {
-                                            playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
-                                            activeDoubleTapSide = DoubleTapSide.RIGHT
-                                        }
-                                        feedbackJob?.cancel()
-                                        feedbackJob = coroutineScope.launch {
-                                            delay(600)
-                                            activeDoubleTapSide = null
-                                        }
-                                    }
-                                } else {
-                                    lastTapTime = now
-                                    lastTapOffset = downPos
-                                    singleTapJob?.cancel()
-                                    singleTapJob = coroutineScope.launch {
-                                        delay(260)
-                                        controlsVisible = !controlsVisible
-                                        lastTapTime = 0L
-                                    }
-                                }
-                            }
-                        }
-                    },
+                    .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
                 // High-resolution static thumbnail poster (ALWAYS rendered on each page)
