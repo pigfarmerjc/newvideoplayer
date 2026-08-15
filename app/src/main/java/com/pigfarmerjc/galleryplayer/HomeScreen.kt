@@ -62,7 +62,9 @@ fun HomeScreen(
     folderGridState: androidx.compose.foundation.lazy.grid.LazyGridState = rememberLazyGridState(),
     imageGridState: androidx.compose.foundation.lazy.grid.LazyGridState = rememberLazyGridState(),
     videoGridColumnCount: Int = 0,
-    onVideoGridColumnCountChange: (Int) -> Unit = {}
+    onVideoGridColumnCountChange: (Int) -> Unit = {},
+    favoriteVideos: List<LocalMediaItem> = emptyList(),
+    onFavoriteFolderClick: () -> Unit = {}
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -108,7 +110,10 @@ fun HomeScreen(
                     sortMode = folderSortMode,
                     onSortModeChange = onFolderSortModeChange,
                     videos = videos,
-                    gridState = folderGridState
+                    gridState = folderGridState,
+                    favoriteCount = favoriteVideos.size,
+                    favoriteCoverUri = favoriteVideos.firstOrNull()?.contentUri,
+                    onFavoriteFolderClick = onFavoriteFolderClick
                 )
                 HomeTab.IMAGES -> ImageGridScreen(
                     images = images,

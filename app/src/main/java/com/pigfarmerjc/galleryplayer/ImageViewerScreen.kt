@@ -32,12 +32,17 @@ import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 import kotlinx.coroutines.launch
 
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageViewerScreen(
     images: List<LocalMediaItem>,
     initialIndex: Int,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isFavorite: (String) -> Boolean = { false },
+    onToggleFavorite: (String) -> Unit = {}
 ) {
     val pagerState = rememberPagerState(
         initialPage = initialIndex,
@@ -142,6 +147,16 @@ fun ImageViewerScreen(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
                 )
+                if (currentItem != null) {
+                    val fav = isFavorite(currentItem.contentUri)
+                    IconButton(onClick = { onToggleFavorite(currentItem.contentUri) }) {
+                        Icon(
+                            imageVector = if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = if (fav) "取消收藏" else "加入收藏",
+                            tint = if (fav) Color(0xFFFF3B30) else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
                 if (images.isNotEmpty()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceVariant,

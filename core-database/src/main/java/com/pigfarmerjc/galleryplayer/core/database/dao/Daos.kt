@@ -70,6 +70,9 @@ interface MediaItemDao {
 
     @Query("SELECT * FROM media_items WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): MediaItemEntity?
+
+    @Query("UPDATE media_items SET is_favorite = :isFavorite WHERE content_uri = :contentUri")
+    suspend fun updateFavorite(contentUri: String, isFavorite: Boolean)
 }
 
 @Dao

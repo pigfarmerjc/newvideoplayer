@@ -29,6 +29,11 @@ import com.pigfarmerjc.galleryplayer.core.database.GalleryDatabase
 import com.pigfarmerjc.galleryplayer.core.database.repository.RoomMediaRepository
 import com.pigfarmerjc.galleryplayer.core.database.repository.RoomPlaybackHistoryRepository
 import com.pigfarmerjc.galleryplayer.core.model.ScanState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.Favorite
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackState
@@ -95,6 +100,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val imageGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
     val folderVideosGridState = androidx.compose.foundation.lazy.grid.LazyGridState()
 
+    // Favorites persistence & state
+    var favoriteUris by mutableStateOf<Set<String>>(emptySet())
+    val favoriteVideosList = derivedStateOf {
+        val favs = favoriteUris
+        videosList.filter { favs.contains(it.contentUri) }
+    }
+
     val historyListState = mutableStateOf<List<com.pigfarmerjc.galleryplayer.core.database.repository.PlaybackHistoryItem>>(emptyList())
 
     val continueWatchingList = derivedStateOf {
@@ -114,6 +126,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         defaultSpeed = sharedPrefs.getFloat("default_speed", 1.0f)
         skipSeconds = sharedPrefs.getInt("skip_seconds", 10)
         videoGridColumnCount = sharedPrefs.getInt("video_grid_column_count", 0)
+
+        val favPrefs = application.getSharedPreferences("favorites_settings", android.content.Context.MODE_PRIVATE)
+        favoriteUris = favPrefs.getStringSet("favorite_uris", emptySet())?.toSet() ?: emptySet()
 
         val sortPrefs = application.getSharedPreferences("library_sort_settings", android.content.Context.MODE_PRIVATE)
         videoSortMode = VideoSortMode.valueOf(sortPrefs.getString("video_sort_mode", VideoSortMode.DATE_MODIFIED_DESC.name) ?: VideoSortMode.DATE_MODIFIED_DESC.name)
@@ -214,10 +229,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .edit().putString("decoder_mode", mode.name).apply()
     }
 
-    fun updateVideoGridColumnCount(cols: Int) {
-        videoGridColumnCount = cols
+    fun updateVideoGridColumnCount(columns: Int) {
+        videoGridColumnCount = columns
         getApplication<Application>().getSharedPreferences("player_settings", android.content.Context.MODE_PRIVATE)
-            .edit().putInt("video_grid_column_count", cols).apply()
+            .edit().putInt("video_grid_column_count", columns).apply()
+    }
+
+    fun isFavorite(uri: String): Boolean = favoriteUris.contains(uri)
+
+    fun toggleFavorite(uri: String) {
+        val current = favoriteUris.toMutableSet()
+        val willBeFavorite = !current.contains(uri)
+        if (willBeFavorite) {
+            current.add(uri)
+        } else {
+            current.remove(uri)
+        }
+        favoriteUris = current
+        val favPrefs = getApplication<Application>().getSharedPreferences("favorites_settings", android.content.Context.MODE_PRIVATE)
+        favPrefs.edit().putStringSet("favorite_uris", current).apply()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            database.mediaItemDao().updateFavorite(uri, willBeFavorite)
+        }
     }
 
     fun startPlaybackSession(video: LocalMediaItem) {
@@ -365,6 +399,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(WindowInsetsCompat.Type.navigationBars())
+
         setContent {
             val viewModel: MainViewModel = viewModel()
             val context = LocalContext.current
@@ -418,8 +457,8 @@ class MainActivity : ComponentActivity() {
                         val screenStack = remember { mutableStateListOf<Screen>(Screen.Home) }
 
                         Box(modifier = Modifier.fillMaxSize()) {
-                            // Layer 1: Base Screen (HomeScreen or FolderVideos)
-                            val baseScreen = screenStack.lastOrNull { it is Screen.Home || it is Screen.FolderVideos } ?: Screen.Home
+                            // Layer 1: Base Screen (HomeScreen, FolderVideos, or Favorites)
+                            val baseScreen = screenStack.lastOrNull { it is Screen.Home || it is Screen.FolderVideos || it is Screen.Favorites } ?: Screen.Home
                             when (baseScreen) {
                                 is Screen.Home -> {
                                     HomeScreen(
@@ -433,6 +472,8 @@ class MainActivity : ComponentActivity() {
                                         imageGridState = viewModel.imageGridState,
                                         videoGridColumnCount = viewModel.videoGridColumnCount,
                                         onVideoGridColumnCountChange = { viewModel.updateVideoGridColumnCount(it) },
+                                        favoriteVideos = viewModel.favoriteVideosList.value,
+                                        onFavoriteFolderClick = { screenStack.add(Screen.Favorites) },
                                         onVideoClick = { video, list ->
                                             scope.launch {
                                                 val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
@@ -493,6 +534,77 @@ class MainActivity : ComponentActivity() {
                                         onAddSafFolder = { viewModel.addSafFolder(it, context) },
                                         onRemoveSafFolder = { viewModel.removeSafFolder(it, context) }
                                     )
+                                }
+                                is Screen.Favorites -> {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .statusBarsPadding()
+                                                .height(56.dp)
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            IconButton(onClick = {
+                                                val favIdx = screenStack.indexOfLast { it is Screen.Favorites }
+                                                if (favIdx >= 0) screenStack.removeAt(favIdx)
+                                            }) {
+                                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Favorite,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFFF3B30),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Text(
+                                                    text = "我的收藏 (${viewModel.favoriteVideosList.value.size})",
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                            }
+                                        }
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            VideoGridScreen(
+                                                videos = viewModel.favoriteVideosList.value,
+                                                gridState = viewModel.folderVideosGridState,
+                                                onVideoClick = { video, list ->
+                                                    scope.launch {
+                                                        val resumePos = viewModel.getResumePlaybackPosition(video.contentUri)
+                                                        if (resumePos > 0L) {
+                                                            android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        screenStack.add(
+                                                            Screen.Player(
+                                                                videoUri = video.contentUri,
+                                                                videoTitle = video.displayName,
+                                                                videoList = list,
+                                                                currentIndex = list.indexOf(video),
+                                                                initialPositionMs = resumePos
+                                                            )
+                                                        )
+                                                    }
+                                                },
+                                                onRefresh = { viewModel.refreshLocalMedia(context) },
+                                                isLoading = viewModel.isLoadingMedia,
+                                                loadError = viewModel.mediaLoadError,
+                                                playbackProgressMap = viewModel.playbackProgressMap.value,
+                                                sortMode = viewModel.videoSortMode,
+                                                onSortModeChange = { viewModel.updateVideoSortMode(it) },
+                                                persistedColumnCount = viewModel.videoGridColumnCount,
+                                                onColumnCountChange = { viewModel.updateVideoGridColumnCount(it) }
+                                            )
+                                        }
+                                    }
+                                    BackHandler {
+                                        val favIdx = screenStack.indexOfLast { it is Screen.Favorites }
+                                        if (favIdx >= 0) screenStack.removeAt(favIdx)
+                                    }
                                 }
                                 is Screen.FolderVideos -> {
                                     val folderVideos = FolderSort.videosInFolder(
@@ -572,7 +684,9 @@ class MainActivity : ComponentActivity() {
                                     onBack = {
                                         val idx = screenStack.indexOfLast { it is Screen.ImageViewer }
                                         if (idx >= 0) screenStack.removeAt(idx)
-                                    }
+                                    },
+                                    isFavorite = { viewModel.isFavorite(it) },
+                                    onToggleFavorite = { viewModel.toggleFavorite(it) }
                                 )
                             }
 
@@ -629,7 +743,9 @@ class MainActivity : ComponentActivity() {
                                     defaultSpeed = viewModel.defaultSpeed,
                                     skipSeconds = viewModel.skipSeconds,
                                     repeatMode = viewModel.repeatModeState,
-                                    onRepeatModeChange = { viewModel.updateRepeatMode(it) }
+                                    onRepeatModeChange = { viewModel.updateRepeatMode(it) },
+                                    isFavorite = viewModel.isFavorite(activePlayer.videoUri),
+                                    onToggleFavorite = { viewModel.toggleFavorite(activePlayer.videoUri) }
                                 )
                             }
                         }

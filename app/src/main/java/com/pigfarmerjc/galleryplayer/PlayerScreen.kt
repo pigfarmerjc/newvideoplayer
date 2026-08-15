@@ -72,7 +72,9 @@ fun PlayerScreen(
     defaultSpeed: Float,
     skipSeconds: Int,
     repeatMode: PlaybackRepeatMode,
-    onRepeatModeChange: (PlaybackRepeatMode) -> Unit
+    onRepeatModeChange: (PlaybackRepeatMode) -> Unit,
+    isFavorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -136,8 +138,8 @@ fun PlayerScreen(
         playbackEngine.stop()
     }
 
-    // Full-screen immersive window setup
-    DisposableEffect(videoUri) {
+    // Full-screen immersive window setup (keyed on Unit to avoid insets reset when switching videos)
+    DisposableEffect(Unit) {
         val activity = context.findActivity()
         val window = activity?.window
         if (window != null) {
@@ -148,9 +150,10 @@ fun PlayerScreen(
         }
         onDispose {
             if (window != null) {
-                WindowCompat.setDecorFitsSystemWindows(window, true)
+                WindowCompat.setDecorFitsSystemWindows(window, false)
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
-                controller.show(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.navigationBars())
             }
         }
     }
@@ -758,6 +761,13 @@ fun PlayerScreen(
                         maxLines = 1,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = onToggleFavorite) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = if (isFavorite) "取消收藏" else "加入收藏",
+                            tint = if (isFavorite) Color(0xFFFF3B30) else Color.White
+                        )
+                    }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         IconButton(onClick = {
                             val activity = context.findActivity()

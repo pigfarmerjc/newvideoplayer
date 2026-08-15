@@ -25,6 +25,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pigfarmerjc.galleryplayer.core.model.MediaType
 
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+
 @Composable
 fun FolderScreen(
     folders: List<FolderItem>,
@@ -35,7 +40,10 @@ fun FolderScreen(
     sortMode: FolderSortMode,
     onSortModeChange: (FolderSortMode) -> Unit,
     videos: List<LocalMediaItem>,
-    gridState: LazyGridState = rememberLazyGridState()
+    gridState: LazyGridState = rememberLazyGridState(),
+    favoriteCount: Int = 0,
+    favoriteCoverUri: String? = null,
+    onFavoriteFolderClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val hasPermission = PermissionState.hasVideoPermission(context)
@@ -97,126 +105,197 @@ fun FolderScreen(
         return
     }
 
-    if (folders.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val screenWidth = configuration.screenWidthDp
+
+    val columns = GalleryLayout.columnsForWidth(screenWidth, isLandscape).coerceAtMost(5)
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        // Sort Selector Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "还没有找到文件夹",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = "包含视频的目录会自动显示在这里",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "重新扫描")
+            Text(
+                text = "文件夹",
+                style = MaterialTheme.typography.headlineMedium
+            )
+            
+            Box {
+                var sortExpanded by remember { mutableStateOf(false) }
+                TextButton(onClick = { sortExpanded = true }) {
+                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("重新扫描")
+                    val label = when (sortMode) {
+                        FolderSortMode.NAME_ASC -> "名称"
+                        FolderSortMode.VIDEO_COUNT_DESC -> "视频数量"
+                        FolderSortMode.TOTAL_SIZE_DESC -> "占用空间"
+                        FolderSortMode.DATE_MODIFIED_DESC -> "最近更新"
+                    }
+                    Text(label)
+                }
+                DropdownMenu(
+                    expanded = sortExpanded,
+                    onDismissRequest = { sortExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("名称 A–Z") },
+                        onClick = {
+                            onSortModeChange(FolderSortMode.NAME_ASC)
+                            sortExpanded = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("视频数量") },
+                        onClick = {
+                            onSortModeChange(FolderSortMode.VIDEO_COUNT_DESC)
+                            sortExpanded = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("占用空间") },
+                        onClick = {
+                            onSortModeChange(FolderSortMode.TOTAL_SIZE_DESC)
+                            sortExpanded = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("最近更新") },
+                        onClick = {
+                            onSortModeChange(FolderSortMode.DATE_MODIFIED_DESC)
+                            sortExpanded = false
+                        }
+                    )
                 }
             }
         }
-    } else {
-        val configuration = LocalConfiguration.current
-        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val screenWidth = configuration.screenWidthDp
 
-        val columns = GalleryLayout.columnsForWidth(screenWidth, isLandscape).coerceAtMost(5)
-
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            state = gridState,
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .weight(1f)
+        ) {
+            // Pinned "Favorites" Folder Card
+            item(key = "pinned_favorites_folder", contentType = "folder-card") {
+                FavoritesFolderCard(
+                    favoriteCount = favoriteCount,
+                    coverUri = favoriteCoverUri,
+                    onClick = onFavoriteFolderClick
+                )
             }
 
-            // Sort Selector Bar
-            Row(
+            items(
+                items = sortedFolders,
+                key = { "${it.volumeName}:${it.relativePath}" },
+                contentType = { "folder-card" }
+            ) { folder ->
+                FolderCard(
+                    folder = folder,
+                    onClick = { onFolderClick(folder) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun FavoritesFolderCard(
+    favoriteCount: Int,
+    coverUri: String?,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .aspectRatio(1.6f)
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .background(Color(0xFF232326)),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "文件夹",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                
-                Box {
-                    var sortExpanded by remember { mutableStateOf(false) }
-                    TextButton(onClick = { sortExpanded = true }) {
-                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        val label = when (sortMode) {
-                            FolderSortMode.NAME_ASC -> "名称"
-                            FolderSortMode.VIDEO_COUNT_DESC -> "视频数量"
-                            FolderSortMode.TOTAL_SIZE_DESC -> "占用空间"
-                            FolderSortMode.DATE_MODIFIED_DESC -> "最近更新"
-                        }
-                        Text(label)
-                    }
-                    DropdownMenu(
-                        expanded = sortExpanded,
-                        onDismissRequest = { sortExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("名称 A–Z") },
-                            onClick = {
-                                onSortModeChange(FolderSortMode.NAME_ASC)
-                                sortExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("视频数量") },
-                            onClick = {
-                                onSortModeChange(FolderSortMode.VIDEO_COUNT_DESC)
-                                sortExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("占用空间") },
-                            onClick = {
-                                onSortModeChange(FolderSortMode.TOTAL_SIZE_DESC)
-                                sortExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("最近更新") },
-                            onClick = {
-                                onSortModeChange(FolderSortMode.DATE_MODIFIED_DESC)
-                                sortExpanded = false
-                            }
+                if (coverUri != null) {
+                    MediaThumbnail(
+                        contentUri = coverUri,
+                        mediaType = MediaType.VIDEO,
+                        modifier = Modifier.fillMaxSize(),
+                        width = 320,
+                        height = 200
+                    )
+                    // Dim gradient scrim
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))
+                                )
+                            )
+                    )
+                }
+                Surface(
+                    color = Color.Black.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = "我的收藏",
+                            tint = Color(0xFFFF3B30),
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                 }
             }
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                state = gridState,
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f)
+            Column(
+                modifier = Modifier.padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                items(
-                    items = sortedFolders,
-                    key = { "${it.volumeName}:${it.relativePath}" },
-                    contentType = { "folder-card" }
-                ) { folder ->
-                    FolderCard(
-                        folder = folder,
-                        onClick = { onFolderClick(folder) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Favorite,
+                        contentDescription = null,
+                        tint = Color(0xFFFF3B30),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "我的收藏",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+                
+                Text(
+                    text = "$favoriteCount 个视频",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }

@@ -4,6 +4,7 @@ import com.pigfarmerjc.galleryplayer.core.model.MediaType
 
 sealed class Screen {
     object Home : Screen()
+    object Favorites : Screen()
     
     data class FolderVideos(
         val volumeName: String,
