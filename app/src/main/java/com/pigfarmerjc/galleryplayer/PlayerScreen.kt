@@ -2,6 +2,7 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -16,6 +17,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -67,6 +70,7 @@ private fun Context.findActivity(): ComponentActivity? {
 }
 
 enum class DoubleTapSide { LEFT, RIGHT }
+enum class DragAxis { NONE, HORIZONTAL, VERTICAL }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -363,59 +367,14 @@ fun PlayerScreen(
     val dismissCornerRadius = (28f * (dismissProgress * 2.5f).coerceIn(0f, 1f)).dp
     val dismissThresholdPx = with(density) { 100.dp.toPx() }
 
-    val nestedScrollConnection = remember(screenHeightPx, dismissThresholdPx) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (dragOffsetY != 0f) {
-                    dragOffsetY += available.y
-                    return Offset(0f, available.y)
-                }
-                if (abs(available.y) > abs(available.x) && abs(available.y) > 4f) {
-                    dragOffsetY += available.y
-                    return Offset(0f, available.y)
-                }
-                return Offset.Zero
-            }
-
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (available.y != 0f) {
-                    dragOffsetY += available.y
-                    return Offset(0f, available.y)
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                val velocityY = available.y
-                val shouldDismiss = abs(dragOffsetY) > dismissThresholdPx || abs(velocityY) > 750f
-                if (shouldDismiss && abs(dragOffsetY) > 16f) {
-                    val targetY = if (dragOffsetY >= 0) screenHeightPx else -screenHeightPx
-                    Animatable(dragOffsetY).animateTo(
-                        targetY,
-                        tween(180, easing = FastOutSlowInEasing)
-                    ) {
-                        dragOffsetY = value
-                    }
-                    saveProgressAndStop()
-                    onBack()
-                } else {
-                    Animatable(dragOffsetY).animateTo(
-                        0f,
-                        spring(0.82f, Spring.StiffnessMediumLow)
-                    ) {
-                        dragOffsetY = value
-                    }
-                }
-                return Velocity(0f, velocityY)
-            }
-        }
-    }
+    var lastTapTime by remember { mutableLongStateOf(0L) }
+    var lastTapOffset by remember { mutableStateOf(Offset.Zero) }
+    var singleTapJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = bgAlpha))
-            .nestedScroll(nestedScrollConnection)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -438,40 +397,111 @@ fun PlayerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .pointerInput(speed, skipSeconds, currentSpeed) {
-                        detectTapGestures(
-                            onTap = {
-                                controlsVisible = !controlsVisible
-                            },
-                            onDoubleTap = { offset ->
-                                val currentPos = playbackEngine.positionMs.value
-                                val dur = playbackEngine.durationMs.value
-                                if (dur <= 0L) return@detectTapGestures
-                                val isLeft = offset.x < size.width / 2
-                                val skipOffset = skipSeconds * 1000L
-                                if (isLeft) {
-                                    playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
-                                    activeDoubleTapSide = DoubleTapSide.LEFT
-                                } else {
-                                    playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
-                                    activeDoubleTapSide = DoubleTapSide.RIGHT
-                                }
-                                feedbackJob?.cancel()
-                                feedbackJob = coroutineScope.launch {
-                                    delay(600)
-                                    activeDoubleTapSide = null
-                                }
-                            },
-                            onLongPress = {
-                                coroutineScope.launch {
+                    .pointerInput(speed, skipSeconds, currentSpeed, screenHeightPx, dismissThresholdPx) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val downPos = down.position
+                            val downId = down.id
+                            var isHolding = false
+                            var dragAxis = DragAxis.NONE
+                            val velocityTracker = VelocityTracker()
+                            velocityTracker.addPosition(down.uptimeMillis, down.position)
+
+                            val longPressJob = coroutineScope.launch {
+                                delay(400)
+                                if (dragAxis == DragAxis.NONE) {
+                                    isHolding = true
                                     isHoldingSpeed = true
                                     playbackEngine.setSpeed(2.0f)
-                                    delay(2000)
-                                    isHoldingSpeed = false
-                                    playbackEngine.setSpeed(currentSpeed)
                                 }
                             }
-                        )
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pointer = event.changes.firstOrNull { it.id == downId } ?: break
+                                if (!pointer.pressed) {
+                                    break
+                                }
+                                velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
+                                val dx = pointer.position.x - downPos.x
+                                val dy = pointer.position.y - downPos.y
+
+                                if (dragAxis == DragAxis.NONE) {
+                                    val absX = abs(dx)
+                                    val absY = abs(dy)
+                                    if (absX > 14f || absY > 14f) {
+                                        longPressJob.cancel()
+                                        dragAxis = if (absY > absX) DragAxis.VERTICAL else DragAxis.HORIZONTAL
+                                    }
+                                }
+
+                                if (dragAxis == DragAxis.VERTICAL) {
+                                    longPressJob.cancel()
+                                    pointer.consume()
+                                    dragOffsetY = dy
+                                }
+                            }
+
+                            longPressJob.cancel()
+                            if (isHolding) {
+                                isHoldingSpeed = false
+                                playbackEngine.setSpeed(currentSpeed)
+                            } else if (dragAxis == DragAxis.VERTICAL) {
+                                val velocityY = velocityTracker.calculateVelocity().y
+                                val absY = abs(dragOffsetY)
+                                val shouldDismiss = absY > dismissThresholdPx || abs(velocityY) > 750f
+                                if (shouldDismiss && absY > 16f) {
+                                    val targetY = if (dragOffsetY >= 0) screenHeightPx else -screenHeightPx
+                                    coroutineScope.launch {
+                                        Animatable(dragOffsetY).animateTo(targetY, tween(180, easing = FastOutSlowInEasing)) {
+                                            dragOffsetY = value
+                                        }
+                                        saveProgressAndStop()
+                                        onBack()
+                                    }
+                                } else {
+                                    coroutineScope.launch {
+                                        Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
+                                            dragOffsetY = value
+                                        }
+                                    }
+                                }
+                            } else if (dragAxis == DragAxis.NONE) {
+                                val now = SystemClock.uptimeMillis()
+                                if (now - lastTapTime < 280L && (downPos - lastTapOffset).getDistance() < 60.dp.toPx()) {
+                                    singleTapJob?.cancel()
+                                    singleTapJob = null
+                                    lastTapTime = 0L
+                                    val currentPos = playbackEngine.positionMs.value
+                                    val dur = playbackEngine.durationMs.value
+                                    if (dur > 0L) {
+                                        val isLeft = downPos.x < size.width / 2f
+                                        val skipOffset = skipSeconds * 1000L
+                                        if (isLeft) {
+                                            playbackEngine.seekTo(maxOf(currentPos - skipOffset, 0L))
+                                            activeDoubleTapSide = DoubleTapSide.LEFT
+                                        } else {
+                                            playbackEngine.seekTo(minOf(currentPos + skipOffset, dur))
+                                            activeDoubleTapSide = DoubleTapSide.RIGHT
+                                        }
+                                        feedbackJob?.cancel()
+                                        feedbackJob = coroutineScope.launch {
+                                            delay(600)
+                                            activeDoubleTapSide = null
+                                        }
+                                    }
+                                } else {
+                                    lastTapTime = now
+                                    lastTapOffset = downPos
+                                    singleTapJob?.cancel()
+                                    singleTapJob = coroutineScope.launch {
+                                        delay(260)
+                                        controlsVisible = !controlsVisible
+                                        lastTapTime = 0L
+                                    }
+                                }
+                            }
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -957,9 +987,10 @@ fun PlayerScreen(
                         TextButton(onClick = { playbackEngine.seekTo(maxOf(position - skipSeconds * 1000L, 0L)) }) {
                             Text("−${skipSeconds}", color = Color.White, style = MaterialTheme.typography.titleMedium)
                         }
+                        val isPlayingOrBuffering = state == PlaybackState.Playing || state == PlaybackState.Buffering || state == PlaybackState.Opening
                         FilledIconButton(
                             onClick = {
-                                if (state == PlaybackState.Playing) playbackEngine.pause() else playbackEngine.play()
+                                if (isPlayingOrBuffering) playbackEngine.pause() else playbackEngine.play()
                             },
                             modifier = Modifier.size(62.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(
@@ -968,8 +999,8 @@ fun PlayerScreen(
                             )
                         ) {
                             Icon(
-                                if (state == PlaybackState.Playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                if (state == PlaybackState.Playing) "暂停" else "播放",
+                                if (isPlayingOrBuffering) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                if (isPlayingOrBuffering) "暂停" else "播放",
                                 modifier = Modifier.size(34.dp)
                             )
                         }
