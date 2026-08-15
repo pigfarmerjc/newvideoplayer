@@ -14,10 +14,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -60,6 +63,7 @@ private fun Context.findActivity(): ComponentActivity? {
 
 enum class DoubleTapSide { LEFT, RIGHT }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlayerScreen(
     videoUri: String,
@@ -82,6 +86,34 @@ fun PlayerScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    val pagerState = rememberPagerState(
+        initialPage = currentIndex.coerceIn(0, (videoList.size - 1).coerceAtLeast(0)),
+        pageCount = { videoList.size }
+    )
+
+    // Sync pager when external currentIndex changes
+    LaunchedEffect(currentIndex) {
+        if (pagerState.currentPage != currentIndex && currentIndex in videoList.indices) {
+            pagerState.scrollToPage(currentIndex)
+        }
+    }
+
+    // Sync external videoUri when pager changes
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage in videoList.indices) {
+            val newVideo = videoList[pagerState.currentPage]
+            if (newVideo.contentUri != videoUri) {
+                val currentPos = playbackEngine.positionMs.value
+                val dur = playbackEngine.durationMs.value
+                if (dur > 0) {
+                    val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
+                    onPlaybackProgress(currentPos, dur, isFinished)
+                }
+                onChangeVideo(pagerState.currentPage)
+            }
+        }
+    }
 
     // Collect playback states
     val state by playbackEngine.playbackState.collectAsState()
@@ -120,17 +152,10 @@ fun PlayerScreen(
     // Protect playCount increment from pausing/resuming repeatedly
     var hasStartedSession by remember(videoUri) { mutableStateOf(false) }
 
-    // Drag gesture tracking states
-    var dragOffsetX by remember { mutableStateOf(0f) }
-    var dragOffsetY by remember { mutableStateOf(0f) }
-    var dragDirection by remember { mutableStateOf(DragDirection.Undecided) }
-    var gestureSettling by remember { mutableStateOf(false) }
-    var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Drag down to dismiss tracking
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
 
     val density = LocalDensity.current
-    val horizontalThresholdPx = remember { with(density) { 100.dp.toPx() } }
-    val verticalThresholdPx = remember { with(density) { 140.dp.toPx() } }
-    val lockThresholdPx = remember { with(density) { 10.dp.toPx() } }
 
     // Safe save helpers
     val saveProgress = {
@@ -206,8 +231,6 @@ fun PlayerScreen(
     }
 
     // Throttled preview seeking during continuous drag:
-    // Periodically reads latest dragPosition every ~45ms without cancelling on each touch event,
-    // so video frames follow the finger continuously during dragging.
     LaunchedEffect(isDragging, isSeekable, duration) {
         if (isDragging && isSeekable && duration > 0L) {
             var lastDispatchedSeek = -1L
@@ -230,8 +253,6 @@ fun PlayerScreen(
                     saveProgressAndStop()
                 }
                 PlaybackRepeatMode.ONE -> {
-                    // After Ended, LibVLC marks the media as non-seekable.
-                    // Re-open the same URI to restart from the beginning instead of seeking.
                     playbackEngine.open(android.net.Uri.parse(videoUri))
                 }
                 PlaybackRepeatMode.ALL -> {
@@ -289,12 +310,7 @@ fun PlayerScreen(
 
     LaunchedEffect(videoUri) {
         isFirstFrameReady = false
-        dragOffsetX = 0f
         dragOffsetY = 0f
-        dragDirection = DragDirection.Undecided
-        gestureSettling = false
-        settleJob?.cancel()
-        settleJob = null
     }
 
     LaunchedEffect(state, position, diagnostics.uri, videoUri) {
@@ -337,144 +353,143 @@ fun PlayerScreen(
         }
     }
 
-    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
-
-    // Backdrop opacity: when dragging down, alpha scales down smoothly so underlying gallery is visible
-    val bgAlpha = remember(dragOffsetY, dragDirection) {
-        if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
-            (1f - (dragOffsetY / (screenHeightPx * 0.55f))).coerceIn(0f, 1f)
-        } else {
-            1f
-        }
-    }
-
-    val isDraggingGesture = dragDirection != DragDirection.Undecided || abs(dragOffsetX) > 0f || abs(dragOffsetY) > 0f
+    val dismissProgress = if (screenHeightPx > 0f) (dragOffsetY / screenHeightPx).coerceIn(0f, 1f) else 0f
+    val dismissScale = (1f - dismissProgress * 0.22f).coerceIn(0.75f, 1f)
+    val bgAlpha = if (dragOffsetY > 0f) (1f - (dragOffsetY / (screenHeightPx * 0.55f))).coerceIn(0f, 1f) else 1f
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = bgAlpha))
+            .pointerInput(Unit) {
+                var velocityTracker = VelocityTracker()
+                detectDragGestures(
+                    onDragStart = {
+                        dragOffsetY = 0f
+                        velocityTracker = VelocityTracker()
+                    },
+                    onDrag = { change, dragAmount ->
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                        if (dragAmount.y > 0f || dragOffsetY > 0f) {
+                            if (abs(dragAmount.y) > abs(dragAmount.x) || dragOffsetY > 0f) {
+                                dragOffsetY = (dragOffsetY + dragAmount.y).coerceAtLeast(0f)
+                                if (dragOffsetY > 0f) {
+                                    change.consume()
+                                }
+                            }
+                        }
+                    },
+                    onDragEnd = {
+                        val velocityY = velocityTracker.calculateVelocity().y
+                        if (dragOffsetY > 110.dp.toPx() || velocityY > 800f) {
+                            coroutineScope.launch {
+                                Animatable(dragOffsetY).animateTo(screenHeightPx, tween(180, easing = FastOutSlowInEasing)) {
+                                    dragOffsetY = value
+                                }
+                                saveProgressAndStop()
+                                onBack()
+                            }
+                        } else {
+                            coroutineScope.launch {
+                                Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
+                                    dragOffsetY = value
+                                }
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        coroutineScope.launch {
+                            Animatable(dragOffsetY).animateTo(0f, spring(0.82f, Spring.StiffnessMediumLow)) {
+                                dragOffsetY = value
+                            }
+                        }
+                    }
+                )
+            }
     ) {
-        // 1. Active Video Layer (transforms on drag)
-        Box(
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    when (dragDirection) {
-                        DragDirection.Horizontal -> {
-                            translationX = dragOffsetX
-                        }
-                        DragDirection.Vertical -> {
-                            val progress = if (size.height > 0f) {
-                                (dragOffsetY.coerceAtLeast(0f) / size.height).coerceIn(0f, 1f)
-                            } else 0f
-                            translationY = dragOffsetY.coerceAtLeast(0f)
-                            val scale = (1f - progress * 0.22f).coerceIn(0.75f, 1f)
-                            scaleX = scale
-                            scaleY = scale
-                            clip = progress > 0.005f
-                            shape = RoundedCornerShape((28f * (progress * 2.5f).coerceIn(0f, 1f)).dp)
-                        }
-                        DragDirection.Undecided -> {
-                            if (dragOffsetX != 0f) translationX = dragOffsetX
-                            if (dragOffsetY != 0f) translationY = dragOffsetY.coerceAtLeast(0f)
-                        }
-                    }
-                }
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    val host = videoOutputFactory.create(ctx)
-                    playbackEngine.attachVideoOutput(host)
-                    host.view.apply {
-                        post {
-                            videoHost = host
-                        }
-                    }
+                    translationY = dragOffsetY
+                    scaleX = dismissScale
+                    scaleY = dismissScale
+                    clip = dismissProgress > 0.005f
+                    shape = RoundedCornerShape((28f * (dismissProgress * 2.5f).coerceIn(0f, 1f)).dp)
                 },
+            pageSpacing = 16.dp,
+            beyondViewportPageCount = 1
+        ) { page ->
+            val item = videoList[page]
+            val isCurrentPage = page == pagerState.currentPage
+
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer {
-                        alpha = if (isFirstFrameReady) 1f else 0f
-                    },
-                onRelease = {
-                    playbackEngine.detachVideoOutput()
-                    videoHost?.dispose()
-                    videoHost = null
-                }
-            )
-
-            // Seamless poster overlay: covers until the first frame is playing to eliminate black screen flicker
-            AnimatedVisibility(
-                visible = !isFirstFrameReady,
-                enter = fadeIn(tween(0)),
-                exit = fadeOut(tween(140)),
-                modifier = Modifier.fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
             ) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                    MediaThumbnail(
-                        contentUri = videoUri,
-                        mediaType = MediaType.VIDEO,
-                        modifier = Modifier.fillMaxSize(),
-                        width = 1920,
-                        height = 1080,
-                        maxDecodeDimension = 1024,
-                        contentScale = ContentScale.Fit,
-                        placeholderColor = Color.Black,
-                        showPlaceholderIcon = false
+                // High-resolution static thumbnail poster (ALWAYS rendered on each page)
+                MediaThumbnail(
+                    contentUri = item.contentUri,
+                    mediaType = MediaType.VIDEO,
+                    modifier = Modifier.fillMaxSize(),
+                    width = 1920,
+                    height = 1080,
+                    maxDecodeDimension = 1024,
+                    contentScale = ContentScale.Fit,
+                    placeholderColor = Color.Black,
+                    showPlaceholderIcon = false
+                )
+
+                // Only the ACTIVE page hosts the live VLC video player view!
+                if (isCurrentPage) {
+                    AndroidView(
+                        factory = { ctx ->
+                            val host = videoOutputFactory.create(ctx)
+                            playbackEngine.attachVideoOutput(host)
+                            host.view.apply {
+                                post {
+                                    videoHost = host
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                alpha = if (isFirstFrameReady) 1f else 0f
+                            },
+                        onRelease = {
+                            playbackEngine.detachVideoOutput()
+                            videoHost?.dispose()
+                            videoHost = null
+                        }
                     )
+
+                    // Crossfade overlay: covers until the first frame is ready
+                    AnimatedVisibility(
+                        visible = !isFirstFrameReady,
+                        enter = fadeIn(tween(0)),
+                        exit = fadeOut(tween(140)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                            MediaThumbnail(
+                                contentUri = item.contentUri,
+                                mediaType = MediaType.VIDEO,
+                                modifier = Modifier.fillMaxSize(),
+                                width = 1920,
+                                height = 1080,
+                                maxDecodeDimension = 1024,
+                                contentScale = ContentScale.Fit,
+                                placeholderColor = Color.Black,
+                                showPlaceholderIcon = false
+                            )
+                        }
+                    }
                 }
-            }
-        }
-
-        // 2. Next Video Side Preview (attached to the right when swiping left)
-        if (dragOffsetX < 0f && currentIndex < videoList.size - 1) {
-            val nextVideo = videoList[currentIndex + 1]
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        translationX = size.width + dragOffsetX + 16.dp.toPx()
-                    }
-                    .background(Color.Black)
-            ) {
-                MediaThumbnail(
-                    contentUri = nextVideo.contentUri,
-                    mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize(),
-                    width = 1920,
-                    height = 1080,
-                    maxDecodeDimension = 1024,
-                    contentScale = ContentScale.Fit,
-                    placeholderColor = Color.Black,
-                    showPlaceholderIcon = false
-                )
-            }
-        }
-
-        // 3. Previous Video Side Preview (attached to the left when swiping right)
-        if (dragOffsetX > 0f && currentIndex > 0) {
-            val prevVideo = videoList[currentIndex - 1]
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        translationX = -size.width + dragOffsetX - 16.dp.toPx()
-                    }
-                    .background(Color.Black)
-            ) {
-                MediaThumbnail(
-                    contentUri = prevVideo.contentUri,
-                    mediaType = MediaType.VIDEO,
-                    modifier = Modifier.fillMaxSize(),
-                    width = 1920,
-                    height = 1080,
-                    maxDecodeDimension = 1024,
-                    contentScale = ContentScale.Fit,
-                    placeholderColor = Color.Black,
-                    showPlaceholderIcon = false
-                )
             }
         }
 
@@ -490,7 +505,6 @@ fun PlayerScreen(
                         onDoubleTap = { offset ->
                             val currentPos = playbackEngine.positionMs.value
                             val dur = playbackEngine.durationMs.value
-                            // Guard: if duration is unknown (0), seeking is meaningless and would jump to 0:00
                             if (dur <= 0L) return@detectTapGestures
                             val isLeft = offset.x < size.width / 2
                             val skipOffset = skipSeconds * 1000L
@@ -520,138 +534,6 @@ fun PlayerScreen(
                             if (isLongPress) {
                                 isHoldingSpeed = false
                                 playbackEngine.setSpeed(currentSpeed)
-                                // Consume this release so onTap is NOT triggered after a long-press
-                                // (otherwise the control bar would toggle unexpectedly)
-                            }
-                        }
-                    )
-                }
-                .pointerInput(currentIndex, videoList.size) {
-                    var velocityTracker = VelocityTracker()
-                    detectDragGestures(
-                        onDragStart = {
-                            settleJob?.cancel()
-                            settleJob = null
-                            gestureSettling = false
-                            dragOffsetX = 0f
-                            dragOffsetY = 0f
-                            dragDirection = DragDirection.Undecided
-                            velocityTracker = VelocityTracker()
-                        },
-                        onDrag = { change, dragAmount ->
-                            if (gestureSettling) {
-                                settleJob?.cancel()
-                                settleJob = null
-                                gestureSettling = false
-                            }
-                            velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            dragOffsetX += dragAmount.x
-                            dragOffsetY += dragAmount.y
-
-                            val absX = abs(dragOffsetX)
-                            val absY = abs(dragOffsetY)
-
-                            if (dragDirection == DragDirection.Undecided) {
-                                if (absX > lockThresholdPx || absY > lockThresholdPx) {
-                                    dragDirection = if (absX > absY) {
-                                        DragDirection.Horizontal
-                                    } else {
-                                        DragDirection.Vertical
-                                    }
-                                }
-                            }
-
-                            if (dragDirection == DragDirection.Vertical && dragOffsetY > 0f) {
-                                change.consume()
-                            } else if (dragDirection == DragDirection.Horizontal) {
-                                change.consume()
-                            }
-                        },
-                        onDragEnd = {
-                            if (gestureSettling) return@detectDragGestures
-                            val velocity = velocityTracker.calculateVelocity()
-                            val action = PlayerGestureState.determineAction(
-                                dragOffsetX = dragOffsetX,
-                                dragOffsetY = dragOffsetY,
-                                horizontalThresholdPx = horizontalThresholdPx,
-                                verticalThresholdPx = verticalThresholdPx,
-                                currentIndex = currentIndex,
-                                lastIndex = videoList.size - 1,
-                                velocityX = velocity.x,
-                                velocityY = velocity.y
-                            )
-
-                            when (action) {
-                                PlayerDragAction.Previous -> {
-                                    gestureSettling = true
-                                    settleJob = coroutineScope.launch {
-                                        val targetX = size.width.toFloat() + 16.dp.toPx()
-                                        val anim = Animatable(dragOffsetX)
-                                        anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
-                                        saveProgress()
-                                        onChangeVideo(currentIndex - 1)
-                                    }
-                                }
-                                PlayerDragAction.Next -> {
-                                    gestureSettling = true
-                                    settleJob = coroutineScope.launch {
-                                        val targetX = -size.width.toFloat() - 16.dp.toPx()
-                                        val anim = Animatable(dragOffsetX)
-                                        anim.animateTo(targetX, tween(180, easing = FastOutSlowInEasing)) { dragOffsetX = value }
-                                        saveProgress()
-                                        onChangeVideo(currentIndex + 1)
-                                    }
-                                }
-                                PlayerDragAction.Dismiss -> {
-                                    gestureSettling = true
-                                    settleJob = coroutineScope.launch {
-                                        val anim = Animatable(dragOffsetY)
-                                        anim.animateTo(size.height.toFloat(), tween(180, easing = FastOutSlowInEasing)) { dragOffsetY = value }
-                                        saveProgressAndStop()
-                                        onBack()
-                                        gestureSettling = false
-                                        settleJob = null
-                                    }
-                                }
-                                PlayerDragAction.None -> {
-                                    val settledDirection = dragDirection
-                                    gestureSettling = true
-                                    settleJob = coroutineScope.launch {
-                                        val animation = spring<Float>(
-                                            dampingRatio = 0.82f,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                        if (settledDirection == DragDirection.Vertical || dragOffsetY != 0f) {
-                                            Animatable(dragOffsetY).animateTo(0f, animation) { dragOffsetY = value }
-                                        }
-                                        if (settledDirection == DragDirection.Horizontal || dragOffsetX != 0f) {
-                                            Animatable(dragOffsetX).animateTo(0f, animation) { dragOffsetX = value }
-                                        }
-                                        dragOffsetX = 0f
-                                        dragOffsetY = 0f
-                                        dragDirection = DragDirection.Undecided
-                                        gestureSettling = false
-                                        settleJob = null
-                                    }
-                                }
-                            }
-                        },
-                        onDragCancel = {
-                            val settledDirection = dragDirection
-                            gestureSettling = true
-                            settleJob = coroutineScope.launch {
-                                val animation = spring<Float>(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)
-                                if (settledDirection == DragDirection.Vertical || dragOffsetY != 0f) {
-                                    Animatable(dragOffsetY).animateTo(0f, animation) { dragOffsetY = value }
-                                }
-                                if (settledDirection == DragDirection.Horizontal || dragOffsetX != 0f) {
-                                    Animatable(dragOffsetX).animateTo(0f, animation) { dragOffsetX = value }
-                                }
-                                dragOffsetX = 0f
-                                dragOffsetY = 0f
-                                dragDirection = DragDirection.Undecided
-                                gestureSettling = false
-                                settleJob = null
                             }
                         }
                     )
