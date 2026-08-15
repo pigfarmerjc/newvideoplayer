@@ -155,6 +155,7 @@ open class LibVlcPlaybackEngine protected constructor(
                 _positionMs.value = time
                 if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
                     _playbackState.value = PlaybackState.Playing
+                    activeVideoOutput?.view?.visibility = android.view.View.VISIBLE
                     updateMediaDetails()
                 }
                 "TimeChanged"
@@ -163,6 +164,7 @@ open class LibVlcPlaybackEngine protected constructor(
                 _isSeekable.value = mediaPlayer?.isSeekable ?: false
                 if (_playbackState.value == PlaybackState.Buffering || _playbackState.value == PlaybackState.Opening) {
                     _playbackState.value = PlaybackState.Playing
+                    activeVideoOutput?.view?.visibility = android.view.View.VISIBLE
                     updateMediaDetails()
                 }
                 "PositionChanged"
@@ -360,6 +362,7 @@ open class LibVlcPlaybackEngine protected constructor(
             _videoSize.value = null
             _audioTracks.value = emptyList()
             _subtitleTracks.value = emptyList()
+            activeVideoOutput?.view?.visibility = android.view.View.INVISIBLE
             updateDiagnostics(uri = "", libvlcEvent = "SourceClosed", width = 0, height = 0)
         } finally {
             isClosingSource = false

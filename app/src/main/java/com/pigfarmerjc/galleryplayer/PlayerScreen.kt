@@ -381,7 +381,11 @@ fun PlayerScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = if (isFirstFrameReady) 1f else 0f
+                    },
                 onRelease = {
                     playbackEngine.detachVideoOutput()
                     videoHost?.dispose()
