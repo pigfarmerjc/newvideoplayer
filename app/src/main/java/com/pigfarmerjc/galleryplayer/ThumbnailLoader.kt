@@ -51,6 +51,11 @@ object ThumbnailCache {
         }
         return bitmap
     }
+
+    fun getByUri(contentUri: String): Bitmap? {
+        val snapshot = cache.snapshot()
+        return snapshot.entries.firstOrNull { it.key.startsWith("${contentUri}_") }?.value
+    }
     
     fun put(key: String, bitmap: Bitmap) {
         cache.put(key, bitmap)
@@ -125,7 +130,9 @@ fun MediaThumbnail(
     width: Int = 320,
     height: Int = 180,
     maxDecodeDimension: Int = 768,
-    contentScale: ContentScale = ContentScale.Crop
+    contentScale: ContentScale = ContentScale.Crop,
+    placeholderColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceVariant,
+    showPlaceholderIcon: Boolean = true
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val initialKey = remember(contentUri, width, height, maxDecodeDimension) {
@@ -134,7 +141,7 @@ fun MediaThumbnail(
         "${contentUri}_${decodeWidth}_${decodeHeight}"
     }
     var bitmap by remember(contentUri, width, height, maxDecodeDimension) {
-        mutableStateOf(ThumbnailCache.get(initialKey))
+        mutableStateOf(ThumbnailCache.get(initialKey) ?: ThumbnailCache.getByUri(contentUri))
     }
     var measuredWidth by remember(contentUri) { mutableIntStateOf(width) }
     var measuredHeight by remember(contentUri) { mutableIntStateOf(height) }
@@ -149,18 +156,13 @@ fun MediaThumbnail(
             measuredHeight.coerceAtLeast(1),
             maxDecodeDimension
         )
-        bitmap = result
+        if (result != null) {
+            bitmap = result
+        }
     }
 
     Box(
-        modifier = modifier
-            .onSizeChanged { size ->
-                if (size.width > 0 && size.height > 0) {
-                    measuredWidth = size.width
-                    measuredHeight = size.height
-                }
-            }
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = modifier.background(placeholderColor),
         contentAlignment = Alignment.Center
     ) {
         val b = bitmap
@@ -171,7 +173,7 @@ fun MediaThumbnail(
                 contentScale = contentScale,
                 modifier = Modifier.fillMaxSize()
             )
-        } else {
+        } else if (showPlaceholderIcon) {
             val icon = if (mediaType == MediaType.VIDEO) {
                 Icons.Default.PlayCircle
             } else {

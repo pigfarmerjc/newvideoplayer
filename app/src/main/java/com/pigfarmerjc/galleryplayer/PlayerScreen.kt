@@ -296,7 +296,7 @@ fun PlayerScreen(
                     MediaType.VIDEO,
                     1920,
                     1080,
-                    2048
+                    1024
                 )
             }
             if (currentIndex - 1 >= 0) {
@@ -306,7 +306,7 @@ fun PlayerScreen(
                     MediaType.VIDEO,
                     1920,
                     1080,
-                    2048
+                    1024
                 )
             }
         }
@@ -374,7 +374,12 @@ fun PlayerScreen(
             )
 
             // Seamless poster overlay: covers until the first frame is playing to eliminate black screen flicker
-            if (!isFirstFrameReady) {
+            AnimatedVisibility(
+                visible = !isFirstFrameReady,
+                enter = fadeIn(tween(0)),
+                exit = fadeOut(tween(140)),
+                modifier = Modifier.fillMaxSize()
+            ) {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                     MediaThumbnail(
                         contentUri = videoUri,
@@ -382,7 +387,10 @@ fun PlayerScreen(
                         modifier = Modifier.fillMaxSize(),
                         width = 1920,
                         height = 1080,
-                        contentScale = ContentScale.Fit
+                        maxDecodeDimension = 1024,
+                        contentScale = ContentScale.Fit,
+                        placeholderColor = Color.Black,
+                        showPlaceholderIcon = false
                     )
                 }
             }
@@ -405,7 +413,10 @@ fun PlayerScreen(
                     modifier = Modifier.fillMaxSize(),
                     width = 1920,
                     height = 1080,
-                    contentScale = ContentScale.Fit
+                    maxDecodeDimension = 1024,
+                    contentScale = ContentScale.Fit,
+                    placeholderColor = Color.Black,
+                    showPlaceholderIcon = false
                 )
             }
         }
@@ -427,7 +438,10 @@ fun PlayerScreen(
                     modifier = Modifier.fillMaxSize(),
                     width = 1920,
                     height = 1080,
-                    contentScale = ContentScale.Fit
+                    maxDecodeDimension = 1024,
+                    contentScale = ContentScale.Fit,
+                    placeholderColor = Color.Black,
+                    showPlaceholderIcon = false
                 )
             }
         }
