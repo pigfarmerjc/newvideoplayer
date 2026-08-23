@@ -86,6 +86,7 @@ object ThumbnailLoader {
     // bounded so a fling does not create an IO and native decode storm.
     private val decodeSlots = Semaphore(permits = 3)
     private val decodeDispatcher = Dispatchers.IO.limitedParallelism(3)
+    private val requestCoordinator = ThumbnailRequestCoordinator()
 
     private fun extractVideoFrameFallback(
         context: Context,
@@ -144,53 +145,53 @@ object ThumbnailLoader {
         val decodeWidth = GalleryLayout.thumbnailBucket(width, maxDimension)
         val decodeHeight = GalleryLayout.thumbnailBucket(height, maxDimension)
         val cacheKey = "${contentUri}_${decodeWidth}_${decodeHeight}"
-        val cached = ThumbnailCache.get(cacheKey)
-        if (cached != null) {
-            return@withContext cached
-        }
-
-        return@withContext decodeSlots.withPermit {
-            try {
-                val uri = Uri.parse(contentUri)
-                var bitmap: Bitmap? = null
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        requestCoordinator.load(
+            key = cacheKey,
+            cached = { ThumbnailCache.get(cacheKey) },
+            loader = {
+                decodeSlots.withPermit {
                     try {
-                        bitmap = context.contentResolver.loadThumbnail(uri, Size(decodeWidth, decodeHeight), null)
-                    } catch (e: Exception) {
-                        bitmap = null
-                    }
-                } else {
-                    val id = uri.lastPathSegment?.toLongOrNull()
-                    if (id != null) {
-                        bitmap = if (mediaType == MediaType.VIDEO) {
-                            MediaStore.Video.Thumbnails.getThumbnail(
-                                context.contentResolver,
-                                id,
-                                MediaStore.Video.Thumbnails.MINI_KIND,
-                                null
-                            )
+                        val uri = Uri.parse(contentUri)
+                        var bitmap: Bitmap? = null
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            try {
+                                bitmap = context.contentResolver.loadThumbnail(uri, Size(decodeWidth, decodeHeight), null)
+                            } catch (e: Exception) {
+                                bitmap = null
+                            }
                         } else {
-                            MediaStore.Images.Thumbnails.getThumbnail(
-                                context.contentResolver,
-                                id,
-                                MediaStore.Images.Thumbnails.MINI_KIND,
-                                null
-                            )
+                            val id = uri.lastPathSegment?.toLongOrNull()
+                            if (id != null) {
+                                bitmap = if (mediaType == MediaType.VIDEO) {
+                                    MediaStore.Video.Thumbnails.getThumbnail(
+                                        context.contentResolver,
+                                        id,
+                                        MediaStore.Video.Thumbnails.MINI_KIND,
+                                        null
+                                    )
+                                } else {
+                                    MediaStore.Images.Thumbnails.getThumbnail(
+                                        context.contentResolver,
+                                        id,
+                                        MediaStore.Images.Thumbnails.MINI_KIND,
+                                        null
+                                    )
+                                }
+                            }
                         }
+
+                        if (bitmap == null && mediaType == MediaType.VIDEO) {
+                            bitmap = extractVideoFrameFallback(context, uri, decodeWidth, decodeHeight)
+                        }
+
+                        if (bitmap != null) ThumbnailCache.put(contentUri, cacheKey, bitmap)
+                        bitmap
+                    } catch (e: Exception) {
+                        null
                     }
                 }
-
-                // If MediaStore thumbnail failed or returned null for video, extract frame via MediaMetadataRetriever
-                if (bitmap == null && mediaType == MediaType.VIDEO) {
-                    bitmap = extractVideoFrameFallback(context, uri, decodeWidth, decodeHeight)
-                }
-
-                if (bitmap != null) ThumbnailCache.put(contentUri, cacheKey, bitmap)
-                bitmap
-            } catch (e: Exception) {
-                null
             }
-        }
+        )
     }
 }
 
