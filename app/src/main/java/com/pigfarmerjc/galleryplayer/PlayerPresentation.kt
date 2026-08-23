@@ -42,6 +42,19 @@ fun adjacentVideoIndex(currentIndex: Int, itemCount: Int, direction: Int): Int? 
     return (currentIndex + direction).mod(itemCount)
 }
 
+fun activePlaybackPage(
+    currentPage: Int,
+    settledPage: Int,
+    isScrollInProgress: Boolean
+): Int = if (isScrollInProgress) settledPage else currentPage
+
+fun shouldRequestVideoOpen(
+    videoUri: String,
+    lastRequestedUri: String?,
+    engineUri: String?,
+    hasVideoHost: Boolean
+): Boolean = hasVideoHost && videoUri != lastRequestedUri && videoUri != engineUri
+
 fun pipAspectRatio(width: Int, height: Int): PipAspectRatio? {
     if (width <= 0 || height <= 0) return null
     val divisor = greatestCommonDivisor(width, height)

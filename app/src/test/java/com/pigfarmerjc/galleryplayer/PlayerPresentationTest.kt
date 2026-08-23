@@ -7,6 +7,66 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerPresentationTest {
+    @Test
+    fun `swipe keeps playback on the settled page until motion finishes`() {
+        assertEquals(
+            2,
+            activePlaybackPage(
+                currentPage = 3,
+                settledPage = 2,
+                isScrollInProgress = true
+            )
+        )
+    }
+
+    @Test
+    fun `finished swipe activates the new current page`() {
+        assertEquals(
+            3,
+            activePlaybackPage(
+                currentPage = 3,
+                settledPage = 2,
+                isScrollInProgress = false
+            )
+        )
+    }
+
+    @Test
+    fun `new output host does not reopen an already requested video`() {
+        assertFalse(
+            shouldRequestVideoOpen(
+                videoUri = "content://video/next",
+                lastRequestedUri = "content://video/next",
+                engineUri = "content://video/previous",
+                hasVideoHost = true
+            )
+        )
+    }
+
+    @Test
+    fun `returning from floating playback does not reopen the engine video`() {
+        assertFalse(
+            shouldRequestVideoOpen(
+                videoUri = "content://video/next",
+                lastRequestedUri = "content://video/previous",
+                engineUri = "content://video/next",
+                hasVideoHost = true
+            )
+        )
+    }
+
+    @Test
+    fun `new selection requests one open when a video host is ready`() {
+        assertTrue(
+            shouldRequestVideoOpen(
+                videoUri = "content://video/next",
+                lastRequestedUri = "content://video/previous",
+                engineUri = "content://video/previous",
+                hasVideoHost = true
+            )
+        )
+    }
+
 
     @Test
     fun `time labels support minutes and hours`() {

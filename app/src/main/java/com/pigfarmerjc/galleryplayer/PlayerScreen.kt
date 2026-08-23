@@ -120,6 +120,11 @@ fun PlayerScreen(
         initialPage = currentIndex.coerceIn(0, (videoList.size - 1).coerceAtLeast(0)),
         pageCount = { videoList.size }
     )
+    val activePlaybackPage = activePlaybackPage(
+        currentPage = pagerState.currentPage,
+        settledPage = pagerState.settledPage,
+        isScrollInProgress = pagerState.isScrollInProgress
+    )
 
     // Sync pager when external currentIndex changes
     LaunchedEffect(currentIndex) {
@@ -129,9 +134,9 @@ fun PlayerScreen(
     }
 
     // Sync external videoUri when pager changes
-    LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage in videoList.indices) {
-            val newVideo = videoList[pagerState.currentPage]
+    LaunchedEffect(activePlaybackPage) {
+        if (activePlaybackPage in videoList.indices) {
+            val newVideo = videoList[activePlaybackPage]
             if (newVideo.contentUri != videoUri) {
                 val currentPos = playbackEngine.positionMs.value
                 val dur = playbackEngine.durationMs.value
@@ -139,7 +144,7 @@ fun PlayerScreen(
                     val isFinished = (currentPos.toDouble() / dur.toDouble()) >= 0.90
                     onPlaybackProgress(currentPos, dur, isFinished)
                 }
-                onChangeVideo(pagerState.currentPage)
+                onChangeVideo(activePlaybackPage)
             }
         }
     }
@@ -181,6 +186,7 @@ fun PlayerScreen(
 
     // Keep track of the active video output host
     var videoHost by remember { mutableStateOf<VideoOutputHost?>(null) }
+    var lastRequestedVideoUri by remember { mutableStateOf<String?>(null) }
 
     // Prevent multiple initial seeks
     var hasAppliedInitialSeek by remember(videoUri) { mutableStateOf(false) }
@@ -240,9 +246,13 @@ fun PlayerScreen(
     }
 
     // Open video only AFTER videoHost is attached
-    LaunchedEffect(videoUri, videoHost) {
+    LaunchedEffect(videoUri, videoHost, diagnostics.uri) {
         val host = videoHost
-        if (host != null) {
+        if (diagnostics.uri == videoUri) {
+            lastRequestedVideoUri = videoUri
+        }
+        if (shouldRequestVideoOpen(videoUri, lastRequestedVideoUri, diagnostics.uri, host != null)) {
+            lastRequestedVideoUri = videoUri
             playbackEngine.open(android.net.Uri.parse(videoUri))
         }
     }
@@ -537,7 +547,10 @@ fun PlayerScreen(
             beyondViewportPageCount = 1
         ) { page ->
             val item = videoList[page]
-            val isCurrentPage = page == pagerState.currentPage
+            // Keep VLC bound to the confirmed external selection. The settled-page callback
+            // updates currentIndex and videoUri together, avoiding an intermediate reopen of
+            // the old URI on the newly settled page.
+            val isCurrentPage = page == currentIndex
 
             Box(
                 modifier = Modifier
