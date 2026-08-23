@@ -36,10 +36,17 @@ object ThumbnailCache {
 
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = (maxMemory / 12).coerceIn(16 * 1024, 64 * 1024)
+    private val keyIndex = ThumbnailKeyIndex()
 
     private val cache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, bitmap: Bitmap): Int {
             return bitmap.byteCount / 1024
+        }
+
+        override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
+            if (newValue == null) {
+                keyIndex.remove(key)
+            }
         }
     }
 
@@ -54,16 +61,21 @@ object ThumbnailCache {
     }
 
     fun getByUri(contentUri: String): Bitmap? {
-        val snapshot = cache.snapshot()
-        return snapshot.entries.firstOrNull { it.key.startsWith("${contentUri}_") }?.value
+        val key = keyIndex.latestKey(contentUri) ?: return null
+        return cache.get(key) ?: run {
+            keyIndex.remove(key)
+            null
+        }
     }
     
-    fun put(key: String, bitmap: Bitmap) {
+    fun put(contentUri: String, key: String, bitmap: Bitmap) {
         cache.put(key, bitmap)
+        keyIndex.record(contentUri, key)
     }
 
     fun clear() {
         cache.evictAll()
+        keyIndex.clear()
         hitCount.set(0)
         missCount.set(0)
     }
@@ -173,7 +185,7 @@ object ThumbnailLoader {
                     bitmap = extractVideoFrameFallback(context, uri, decodeWidth, decodeHeight)
                 }
 
-                if (bitmap != null) ThumbnailCache.put(cacheKey, bitmap)
+                if (bitmap != null) ThumbnailCache.put(contentUri, cacheKey, bitmap)
                 bitmap
             } catch (e: Exception) {
                 null
