@@ -404,6 +404,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 class MainActivity : ComponentActivity() {
 
     private var pipMode by mutableStateOf(false)
+    private var floatingWindowActive by mutableStateOf(false)
     private var pipCommandHandler: ((PipCommand) -> Unit)? = null
     private val pipControlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -445,7 +446,7 @@ class MainActivity : ComponentActivity() {
                         val inPiP = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                             this@MainActivity.isInPictureInPictureMode
                         } else false
-                        if (!inPiP) {
+                        if (!inPiP && !floatingWindowActive) {
                             viewModel.wasPlayingBeforeBackground = (viewModel.playbackEngine.playbackState.value == PlaybackState.Playing)
                             viewModel.playbackEngine.pause()
                         }
@@ -762,6 +763,52 @@ class MainActivity : ComponentActivity() {
                                     onDispose { pipCommandHandler = null }
                                 }
 
+                                val floatingConfiguration = remember(
+                                    activePlayer.videoUri,
+                                    activePlayer.currentIndex,
+                                    activePlayer.videoList
+                                ) {
+                                    FloatingPlaybackSession.Configuration(
+                                        playbackEngine = viewModel.playbackEngine,
+                                        videoOutputFactory = viewModel.videoOutputFactory,
+                                        title = {
+                                            (screenStack.lastOrNull { it is Screen.Player } as? Screen.Player)
+                                                ?.videoTitle.orEmpty()
+                                        },
+                                        contentUri = {
+                                            (screenStack.lastOrNull { it is Screen.Player } as? Screen.Player)
+                                                ?.videoUri.orEmpty()
+                                        },
+                                        playlistSize = {
+                                            (screenStack.lastOrNull { it is Screen.Player } as? Screen.Player)
+                                                ?.videoList?.size ?: 0
+                                        },
+                                        repeatMode = { viewModel.repeatModeState },
+                                        onRepeatModeChange = viewModel::updateRepeatMode,
+                                        onPrevious = {
+                                            val player = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
+                                            player?.let {
+                                                adjacentVideoIndex(it.currentIndex, it.videoList.size, -1)
+                                                    ?.let(changePlayerVideo)
+                                            }
+                                        },
+                                        onNext = {
+                                            val player = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
+                                            player?.let {
+                                                adjacentVideoIndex(it.currentIndex, it.videoList.size, 1)
+                                                    ?.let(changePlayerVideo)
+                                            }
+                                        },
+                                        onClosed = { returningToApp ->
+                                            floatingWindowActive = false
+                                            if (!returningToApp) viewModel.playbackEngine.pause()
+                                        }
+                                    )
+                                }
+                                SideEffect {
+                                    FloatingPlaybackSession.configure(floatingConfiguration)
+                                }
+
                                 PlayerScreen(
                                     videoUri = activePlayer.videoUri,
                                     videoTitle = activePlayer.videoTitle,
@@ -796,6 +843,13 @@ class MainActivity : ComponentActivity() {
                                     repeatMode = viewModel.repeatModeState,
                                     onRepeatModeChange = { viewModel.updateRepeatMode(it) },
                                     isInPictureInPictureMode = pipMode,
+                                    isFloatingWindowActive = floatingWindowActive,
+                                    onFloatingWindowRequest = {
+                                        FloatingPlaybackSession.configure(floatingConfiguration)
+                                        floatingWindowActive = true
+                                        FloatingVideoService.start(this@MainActivity)
+                                        this@MainActivity.moveTaskToBack(true)
+                                    },
                                     isFavorite = viewModel.isFavorite(activePlayer.videoUri),
                                     onToggleFavorite = { viewModel.toggleFavorite(activePlayer.videoUri) }
                                 )
@@ -813,6 +867,13 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pipMode = isInPictureInPictureMode
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (floatingWindowActive) {
+            FloatingVideoService.returnToApp(this)
+        }
     }
 
     override fun onDestroy() {

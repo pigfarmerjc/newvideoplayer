@@ -1,7 +1,9 @@
 package com.pigfarmerjc.galleryplayer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerPresentationTest {
@@ -23,6 +25,16 @@ class PlayerPresentationTest {
     }
 
     @Test
+    fun `repeat mode labels and cycle are explicit`() {
+        assertEquals("播完停止", repeatModeLabel(PlaybackRepeatMode.NONE))
+        assertEquals("单个循环", repeatModeLabel(PlaybackRepeatMode.ONE))
+        assertEquals("自动下一个", repeatModeLabel(PlaybackRepeatMode.ALL))
+        assertEquals(PlaybackRepeatMode.ONE, nextRepeatMode(PlaybackRepeatMode.NONE))
+        assertEquals(PlaybackRepeatMode.ALL, nextRepeatMode(PlaybackRepeatMode.ONE))
+        assertEquals(PlaybackRepeatMode.NONE, nextRepeatMode(PlaybackRepeatMode.ALL))
+    }
+
+    @Test
     fun `picture in picture aspect ratio follows landscape and portrait video`() {
         assertEquals(PipAspectRatio(16, 9), pipAspectRatio(1920, 1080))
         assertEquals(PipAspectRatio(9, 16), pipAspectRatio(1080, 1920))
@@ -35,5 +47,11 @@ class PlayerPresentationTest {
         assertEquals(2, adjacentVideoIndex(currentIndex = 0, itemCount = 3, direction = -1))
         assertEquals(0, adjacentVideoIndex(currentIndex = 2, itemCount = 3, direction = 1))
         assertNull(adjacentVideoIndex(currentIndex = 0, itemCount = 0, direction = 1))
+    }
+
+    @Test
+    fun `reattached output waits for a new video surface event`() {
+        assertFalse(isVideoOutputReady(outputRevision = 7L, requiredAfterRevision = 7L))
+        assertTrue(isVideoOutputReady(outputRevision = 8L, requiredAfterRevision = 7L))
     }
 }

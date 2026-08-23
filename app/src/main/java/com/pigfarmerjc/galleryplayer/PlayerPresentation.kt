@@ -10,6 +10,21 @@ sealed interface PlaybackEndAction {
 
 data class PipAspectRatio(val width: Int, val height: Int)
 
+fun isVideoOutputReady(outputRevision: Long, requiredAfterRevision: Long): Boolean =
+    outputRevision > requiredAfterRevision
+
+fun repeatModeLabel(mode: PlaybackRepeatMode): String = when (mode) {
+    PlaybackRepeatMode.NONE -> "播完停止"
+    PlaybackRepeatMode.ONE -> "单个循环"
+    PlaybackRepeatMode.ALL -> "自动下一个"
+}
+
+fun nextRepeatMode(mode: PlaybackRepeatMode): PlaybackRepeatMode = when (mode) {
+    PlaybackRepeatMode.NONE -> PlaybackRepeatMode.ONE
+    PlaybackRepeatMode.ONE -> PlaybackRepeatMode.ALL
+    PlaybackRepeatMode.ALL -> PlaybackRepeatMode.NONE
+}
+
 fun playbackEndAction(
     repeatMode: PlaybackRepeatMode,
     currentIndex: Int,

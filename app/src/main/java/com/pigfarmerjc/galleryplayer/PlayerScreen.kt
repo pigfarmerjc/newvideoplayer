@@ -2,9 +2,14 @@ package com.pigfarmerjc.galleryplayer
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
+import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -17,6 +22,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -36,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -72,7 +79,7 @@ private fun Context.findActivity(): ComponentActivity? {
 enum class DoubleTapSide { LEFT, RIGHT }
 enum class DragAxis { NONE, HORIZONTAL, VERTICAL }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     videoUri: String,
@@ -91,11 +98,22 @@ fun PlayerScreen(
     repeatMode: PlaybackRepeatMode,
     onRepeatModeChange: (PlaybackRepeatMode) -> Unit,
     isInPictureInPictureMode: Boolean = false,
+    isFloatingWindowActive: Boolean = false,
+    onFloatingWindowRequest: () -> Unit = {},
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Settings.canDrawOverlays(context)) {
+            onFloatingWindowRequest()
+        } else {
+            android.widget.Toast.makeText(context, "需要悬浮窗权限才能自由拖动和缩放", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     val pagerState = rememberPagerState(
         initialPage = currentIndex.coerceIn(0, (videoList.size - 1).coerceAtLeast(0)),
@@ -135,6 +153,7 @@ fun PlayerScreen(
     val audioTracks by playbackEngine.audioTracks.collectAsState()
     val subtitleTracks by playbackEngine.subtitleTracks.collectAsState()
     val videoSize by playbackEngine.videoSize.collectAsState()
+    val videoOutputRevision by playbackEngine.videoOutputRevision.collectAsState()
 
     LaunchedEffect(videoSize, state, videoList.size, videoTitle) {
         context.findActivity()?.let { activity ->
@@ -262,7 +281,7 @@ fun PlayerScreen(
     LaunchedEffect(state) {
         if (state == PlaybackState.Ended) {
             when (val action = playbackEndAction(repeatMode, currentIndex, videoList.size)) {
-                PlaybackEndAction.Stop -> saveProgressAndStop()
+                PlaybackEndAction.Stop -> saveProgress()
                 PlaybackEndAction.Replay -> playbackEngine.open(android.net.Uri.parse(videoUri))
                 is PlaybackEndAction.Advance -> {
                     saveProgressAndStop()
@@ -311,17 +330,39 @@ fun PlayerScreen(
         }
     }
 
-    // Track when the active video has decoded its first frame and started playing
+    // Keep the poster visible until LibVLC confirms the newly attached surface is rendering.
     var isFirstFrameReady by remember(videoUri) { mutableStateOf(false) }
+    var requiredAfterOutputRevision by remember(videoUri) { mutableLongStateOf(videoOutputRevision) }
+    var previousPipMode by remember { mutableStateOf(isInPictureInPictureMode) }
+    var previousFloatingMode by remember { mutableStateOf(isFloatingWindowActive) }
+
+    LaunchedEffect(state) {
+        if (state == PlaybackState.Opening) {
+            requiredAfterOutputRevision = videoOutputRevision
+            isFirstFrameReady = false
+        }
+    }
 
     LaunchedEffect(videoUri) {
         isFirstFrameReady = false
+        requiredAfterOutputRevision = videoOutputRevision
     }
 
-    LaunchedEffect(state, position, videoSize, videoUri) {
-        if (state == PlaybackState.Playing || position > 0L || videoSize != null) {
+    LaunchedEffect(videoOutputRevision, requiredAfterOutputRevision) {
+        if (isVideoOutputReady(videoOutputRevision, requiredAfterOutputRevision)) {
             isFirstFrameReady = true
         }
+    }
+
+    LaunchedEffect(isInPictureInPictureMode, isFloatingWindowActive) {
+        val returningFromPip = previousPipMode && !isInPictureInPictureMode
+        val returningFromFloating = previousFloatingMode && !isFloatingWindowActive
+        if (returningFromPip || returningFromFloating) {
+            requiredAfterOutputRevision = videoOutputRevision
+            isFirstFrameReady = false
+        }
+        previousPipMode = isInPictureInPictureMode
+        previousFloatingMode = isFloatingWindowActive
     }
 
     // Fast fallback: reveal the surface after a short timeout so user never gets stuck on black screen
@@ -517,7 +558,7 @@ fun PlayerScreen(
                 )
 
                 // Only the ACTIVE page hosts the live VLC video player view!
-                if (isCurrentPage) {
+                if (isCurrentPage && !isFloatingWindowActive) {
                     AndroidView(
                         factory = { ctx ->
                             val host = videoOutputFactory.create(ctx)
@@ -538,15 +579,16 @@ fun PlayerScreen(
                         },
                         modifier = Modifier.fillMaxSize(),
                         onRelease = {
-                            playbackEngine.detachVideoOutput()
-                            videoHost?.dispose()
+                            val releasedHost = videoHost
+                            playbackEngine.detachVideoOutput(releasedHost)
+                            releasedHost?.dispose()
                             videoHost = null
                         }
                     )
 
                     // Crossfade overlay: covers until the first frame is ready
                     AnimatedVisibility(
-                        visible = !isFirstFrameReady,
+                        visible = !isFirstFrameReady || state == PlaybackState.Ended || state == PlaybackState.Stopped,
                         enter = fadeIn(tween(0)),
                         exit = fadeOut(tween(140)),
                         modifier = Modifier.fillMaxSize()
@@ -755,28 +797,47 @@ fun PlayerScreen(
                     }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         IconButton(onClick = {
-                            val activity = context.findActivity()
-                            if (activity != null) {
-                                enterPictureInPicture(activity, videoSize, state, videoList.size, videoTitle)
+                            if (Settings.canDrawOverlays(context)) {
+                                onFloatingWindowRequest()
+                            } else {
+                                overlayPermissionLauncher.launch(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    )
+                                )
                             }
                         }) {
-                            Icon(Icons.Filled.PictureInPictureAlt, contentDescription = "画中画", tint = Color.White)
+                            Icon(Icons.Filled.PictureInPictureAlt, contentDescription = "自由小窗", tint = Color.White)
                         }
                     }
-                    IconButton(onClick = {
-                        val nextMode = when (repeatMode) {
-                            PlaybackRepeatMode.NONE -> PlaybackRepeatMode.ONE
-                            PlaybackRepeatMode.ONE -> PlaybackRepeatMode.ALL
-                            PlaybackRepeatMode.ALL -> PlaybackRepeatMode.NONE
+                    val repeatIcon = when (repeatMode) {
+                        PlaybackRepeatMode.NONE -> Icons.AutoMirrored.Filled.TrendingFlat
+                        PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne
+                        PlaybackRepeatMode.ALL -> Icons.Filled.Repeat
+                    }
+                    Surface(
+                        onClick = { onRepeatModeChange(nextRepeatMode(repeatMode)) },
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                repeatIcon,
+                                contentDescription = repeatModeLabel(repeatMode),
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                repeatModeLabel(repeatMode),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium
+                            )
                         }
-                        onRepeatModeChange(nextMode)
-                    }) {
-                        val (icon, desc) = when (repeatMode) {
-                            PlaybackRepeatMode.NONE -> Icons.AutoMirrored.Filled.TrendingFlat to "播放一次"
-                            PlaybackRepeatMode.ONE -> Icons.Filled.RepeatOne to "单曲循环"
-                            PlaybackRepeatMode.ALL -> Icons.Filled.Repeat to "列表循环"
-                        }
-                        Icon(icon, contentDescription = desc, tint = Color.White)
                     }
                     if (audioTracks.size > 1 || subtitleTracks.isNotEmpty()) {
                         Box {
@@ -965,6 +1026,38 @@ fun PlayerScreen(
                             activeTrackColor = MaterialTheme.colorScheme.primary,
                             inactiveTrackColor = Color.White.copy(alpha = 0.28f)
                         ),
+                        thumb = {
+                            Box(
+                                Modifier
+                                    .size(width = 4.dp, height = 18.dp)
+                                    .background(Color.White, RoundedCornerShape(2.dp))
+                            )
+                        },
+                        track = { sliderState ->
+                            val range = sliderState.valueRange
+                            val fraction = if (range.endInclusive > range.start) {
+                                ((sliderState.value - range.start) / (range.endInclusive - range.start))
+                                    .coerceIn(0f, 1f)
+                            } else 0f
+                            Canvas(Modifier.fillMaxWidth().height(12.dp)) {
+                                val y = size.height / 2f
+                                val stroke = 3.dp.toPx()
+                                drawLine(
+                                    color = Color.White.copy(alpha = 0.22f),
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = stroke,
+                                    cap = StrokeCap.Round
+                                )
+                                drawLine(
+                                    color = Color(0xFF7CB8FF),
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width * fraction, y),
+                                    strokeWidth = stroke,
+                                    cap = StrokeCap.Round
+                                )
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(
@@ -989,7 +1082,15 @@ fun PlayerScreen(
                         val isPlayingOrBuffering = state == PlaybackState.Playing || state == PlaybackState.Buffering || state == PlaybackState.Opening
                         FilledIconButton(
                             onClick = {
-                                if (isPlayingOrBuffering) playbackEngine.pause() else playbackEngine.play()
+                                when {
+                                    isPlayingOrBuffering -> playbackEngine.pause()
+                                    state == PlaybackState.Ended || state == PlaybackState.Stopped -> {
+                                        coroutineScope.launch {
+                                            playbackEngine.open(Uri.parse(videoUri))
+                                        }
+                                    }
+                                    else -> playbackEngine.play()
+                                }
                             },
                             modifier = Modifier.size(62.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(

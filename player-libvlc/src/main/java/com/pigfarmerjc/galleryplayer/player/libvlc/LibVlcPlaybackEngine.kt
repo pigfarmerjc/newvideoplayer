@@ -45,6 +45,9 @@ open class LibVlcPlaybackEngine protected constructor(
     private val _videoSize = MutableStateFlow<VideoSize?>(null)
     override val videoSize: StateFlow<VideoSize?> = _videoSize.asStateFlow()
 
+    private val _videoOutputRevision = MutableStateFlow(0L)
+    override val videoOutputRevision: StateFlow<Long> = _videoOutputRevision.asStateFlow()
+
     private val _diagnostics = MutableStateFlow(PlaybackDiagnostics())
     override val diagnostics: StateFlow<PlaybackDiagnostics> = _diagnostics.asStateFlow()
 
@@ -173,6 +176,7 @@ open class LibVlcPlaybackEngine protected constructor(
             }
             MediaPlayer.Event.Vout -> {
                 updateVideoSize()
+                _videoOutputRevision.value += 1L
                 "Vout"
             }
             MediaPlayer.Event.ESAdded,
@@ -574,7 +578,8 @@ open class LibVlcPlaybackEngine protected constructor(
         }
     }
 
-    override fun detachVideoOutput() {
+    override fun detachVideoOutput(output: VideoOutputHost?) {
+        if (output != null && activeVideoOutput !== output) return
         mediaPlayer?.detachViews()
         activeVideoOutput = null
     }

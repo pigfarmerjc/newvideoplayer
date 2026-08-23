@@ -12,6 +12,8 @@ interface PlaybackEngine {
     val isSeekable: StateFlow<Boolean>
     val playbackSpeed: StateFlow<Float>
     val videoSize: StateFlow<VideoSize?>
+    /** Increments when LibVLC reports a video output surface is rendering again. */
+    val videoOutputRevision: StateFlow<Long>
     val diagnostics: StateFlow<PlaybackDiagnostics>
     val audioTracks: StateFlow<List<PlaybackTrack>>
     val subtitleTracks: StateFlow<List<PlaybackTrack>>
@@ -28,7 +30,7 @@ interface PlaybackEngine {
     fun selectAudioTrack(trackId: Int): Boolean
     fun selectSubtitleTrack(trackId: Int): Boolean
     fun attachVideoOutput(output: VideoOutputHost)
-    fun detachVideoOutput()
+    fun detachVideoOutput(output: VideoOutputHost? = null)
     fun release()
 }
 
