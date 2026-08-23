@@ -91,43 +91,16 @@ class StorageSyncManager(
 
         // Query existing items on the DB for this volume
         val dbItems = mediaRepository.getMediaItemsOnVolumeSync(volumeName)
-        val dbMap = dbItems.associateBy { it.contentUri }
+        val diff = SyncDiffPlanner.plan(dbItems, scannedItems)
 
-        val scannedUris = scannedItems.map { it.contentUri }.toSet()
-
-        val itemsToUpsert = mutableListOf<MediaItem>()
-        var insertedCount = 0
-        var updatedCount = 0
-
-        for (item in scannedItems) {
-            val dbItem = dbMap[item.contentUri]
-            if (dbItem == null) {
-                // New Item
-                itemsToUpsert.add(item)
-                insertedCount++
-            } else {
-                // Modification Check
-                val hasChanged = dbItem.fileSize != item.fileSize ||
-                        dbItem.dateModifiedEpochSeconds != item.dateModifiedEpochSeconds
-
-                if (hasChanged) {
-                    // Retain db primary key to do update
-                    itemsToUpsert.add(item.copy(databaseId = dbItem.databaseId))
-                    updatedCount++
-                }
-            }
-        }
-
-        // Deletion Scope: ONLY items associated with this volume that are no longer present in the scan
-        val itemsToDelete = dbItems.filter { it.contentUri !in scannedUris }
-        if (itemsToDelete.isNotEmpty()) {
+        if (diff.deletedUris.isNotEmpty()) {
             // Batch delete in one SQL call instead of N individual transactions
-            mediaRepository.deleteMediaItems(itemsToDelete.map { it.contentUri })
+            mediaRepository.deleteMediaItems(diff.deletedUris)
         }
 
         // Batch save new and modified items
-        if (itemsToUpsert.isNotEmpty()) {
-            mediaRepository.saveMediaItems(itemsToUpsert)
+        if (diff.upserts.isNotEmpty()) {
+            mediaRepository.saveScannedMediaItems(diff.upserts)
         }
 
         currentCoroutineContext().ensureActive()
@@ -139,16 +112,18 @@ class StorageSyncManager(
                 sourceType = sourceType,
                 volumeName = volumeName,
                 scannedCount = scannedItems.size,
-                insertedCount = insertedCount,
-                updatedCount = updatedCount,
-                deletedCount = itemsToDelete.size,
+                insertedCount = diff.insertedCount,
+                updatedCount = diff.updatedCount,
+                deletedCount = diff.deletedUris.size,
                 failedItems = 0,
                 lastError = null,
                 currentPath = "Recalculating directory aggregates..."
             )
         )
 
-        recalculateFolders(volumeName, scannedItems, itemsToDelete)
+        val deletedUriSet = diff.deletedUris.toHashSet()
+        val deletedItems = dbItems.filter { it.contentUri in deletedUriSet }
+        recalculateFolders(volumeName, scannedItems, deletedItems)
 
         onProgress(
             ScanProgress(
@@ -156,9 +131,9 @@ class StorageSyncManager(
                 sourceType = sourceType,
                 volumeName = volumeName,
                 scannedCount = scannedItems.size,
-                insertedCount = insertedCount,
-                updatedCount = updatedCount,
-                deletedCount = itemsToDelete.size,
+                insertedCount = diff.insertedCount,
+                updatedCount = diff.updatedCount,
+                deletedCount = diff.deletedUris.size,
                 failedItems = 0,
                 lastError = null,
                 currentPath = "Synchronization completed successfully"
@@ -174,6 +149,9 @@ class StorageSyncManager(
         // Group final scanned items by relativePath
         // Fallback relativePath to root as "" if null
         val foldersGrouped = scannedItems.groupBy { it.relativePath ?: "" }
+        val finalItemsByPath = mediaRepository
+            .getMediaItemsOnVolumeSync(volumeName)
+            .groupBy { it.relativePath ?: "" }
 
         // 1. Update or create folders that contain items
         for ((relativePath, folderItems) in foldersGrouped) {
@@ -185,8 +163,7 @@ class StorageSyncManager(
             val totalSize = folderItems.sumOf { it.fileSize }
             val latestModified = folderItems.maxOfOrNull { it.dateModifiedEpochSeconds ?: 0L } ?: 0L
 
-            // To get database IDs for cover media, retrieve the items from database in this directory
-            val dbFolderItems = mediaRepository.getFolderMediaItems(volumeName, relativePath)
+            val dbFolderItems = finalItemsByPath[relativePath].orEmpty()
             
             // Cover Media Priority: latest modified VIDEO, fallback to latest modified IMAGE/GIF
             val primaryCoverMediaId = dbFolderItems
@@ -213,7 +190,7 @@ class StorageSyncManager(
         // 2. Identify folders that were deleted (now have 0 items)
         val deletedFolderPaths = deletedItems.map { it.relativePath ?: "" }.toSet()
         for (path in deletedFolderPaths) {
-            val activeItems = mediaRepository.getFolderMediaItems(volumeName, path)
+            val activeItems = finalItemsByPath[path].orEmpty()
             if (activeItems.isEmpty()) {
                 mediaRepository.deleteFolder(volumeName, path)
             }

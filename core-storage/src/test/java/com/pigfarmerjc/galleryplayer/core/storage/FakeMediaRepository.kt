@@ -11,6 +11,8 @@ class FakeMediaRepository : MediaRepository {
     val mediaItems = mutableMapOf<String, MediaItem>()
     val folders = mutableMapOf<String, FolderEntity>()
     var nextId = 1L
+    var volumeQueryCount = 0
+    var folderMediaQueryCount = 0
 
     override fun getMediaItems(): Flow<List<MediaItem>> = flowOf(mediaItems.values.toList())
 
@@ -23,10 +25,12 @@ class FakeMediaRepository : MediaRepository {
     }
 
     override suspend fun getMediaItemsOnVolumeSync(volumeName: String): List<MediaItem> {
+        volumeQueryCount++
         return mediaItems.values.filter { it.volumeName == volumeName }
     }
 
     override suspend fun getFolderMediaItems(volumeName: String, relativePath: String): List<MediaItem> {
+        folderMediaQueryCount++
         return mediaItems.values.filter { it.volumeName == volumeName && (it.relativePath ?: "") == relativePath }
     }
 
@@ -57,6 +61,10 @@ class FakeMediaRepository : MediaRepository {
                 mediaItems[item.contentUri] = item.copy(databaseId = nextId++)
             }
         }
+    }
+
+    override suspend fun saveScannedMediaItems(items: List<MediaItem>) {
+        saveMediaItems(items)
     }
 
     override suspend fun deleteMediaItem(contentUri: String) {

@@ -90,6 +90,7 @@ interface MediaRepository {
     suspend fun saveFolder(folder: FolderEntity)
     suspend fun deleteFolder(volumeName: String, relativePath: String)
     suspend fun saveMediaItems(items: List<MediaItem>)
+    suspend fun saveScannedMediaItems(items: List<MediaItem>)
     suspend fun deleteMediaItem(contentUri: String)
     suspend fun deleteMediaItems(contentUris: List<String>)
 }
@@ -155,6 +156,11 @@ class RoomMediaRepository(
 
     override suspend fun saveMediaItems(items: List<MediaItem>) {
         mediaItemDao.upsertAll(items.map { it.toEntity() })
+    }
+
+    override suspend fun saveScannedMediaItems(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        mediaItemDao.upsertScannedBatch(items.map { it.toEntity() })
     }
 
     override suspend fun deleteMediaItem(contentUri: String) {

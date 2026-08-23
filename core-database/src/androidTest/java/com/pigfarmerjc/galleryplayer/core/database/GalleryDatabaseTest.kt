@@ -639,12 +639,13 @@ class GalleryDatabaseTest {
         )
         mediaRepository.saveMediaItems(listOf(domainItem))
 
-        // First session
+        // Saving progress is not a new playback session.
         playbackHistoryRepository.saveHistory("content://media/external/video/media/1", 10000L, 60000L, false)
         val list1 = playbackHistoryRepository.getHistory().first()
         assertEquals(1, list1[0].playCount)
 
-        // Second session
+        // Starting another session is the only operation that increments playCount.
+        playbackHistoryRepository.startPlaybackSession("content://media/external/video/media/1")
         playbackHistoryRepository.saveHistory("content://media/external/video/media/1", 20000L, 60000L, false)
         val list2 = playbackHistoryRepository.getHistory().first()
         assertEquals("playCount should be incremented to 2", 2, list2[0].playCount)
@@ -675,19 +676,22 @@ class GalleryDatabaseTest {
     }
 
     @Test
-    fun testFavoriteAndHiddenUpdates() = runBlocking {
+    fun testScannerUpsertPreservesFavoriteAndHiddenFlags() = runBlocking {
         val item = MediaItemEntity(
             contentUri = "content://media/external/video/media/1",
             mediaType = "VIDEO", volumeName = "external_primary", mediaStoreId = 1L, relativePath = "DCIM/", displayName = "1.mp4", mimeType = "video/mp4", fileSize = 1000L, durationMs = null, width = null, height = null, rotationDegrees = null, dateAddedEpochSeconds = null, dateModifiedEpochSeconds = null, dateTakenEpochMillis = null, videoCodec = null, audioCodec = null, audioSampleFormat = null, audioSampleRate = null, audioChannels = null, frameRate = null, bitrate = null, isFavorite = false, isHidden = false, scanState = "SCANNED", lastError = null
         )
         val id = mediaItemDao.upsert(item)
 
-        val updatedFav = item.copy(id = id, isFavorite = true, isHidden = true)
-        mediaItemDao.upsert(updatedFav)
+        mediaItemDao.update(item.copy(id = id, isFavorite = true, isHidden = true))
+
+        // A later scanner upsert carries default flags, but must not erase user choices.
+        mediaItemDao.upsert(item.copy(id = id, fileSize = 2000L))
 
         val retrieved = mediaItemDao.getById(id)
         assertTrue(retrieved?.isFavorite == true)
         assertTrue(retrieved?.isHidden == true)
+        assertEquals(2000L, retrieved?.fileSize)
     }
 
     @Test

@@ -82,6 +82,24 @@ class FolderAggregationTest {
         assertEquals(1500L, rootFolder.latestModified)
     }
 
+    @Test
+    fun folderAggregationDoesNotQueryMediaOncePerFolder() = runTest {
+        val scannedList = listOf(
+            createMediaItem("content://media/a", MediaType.VIDEO, "Movies/A", 1000L, 100L),
+            createMediaItem("content://media/b", MediaType.VIDEO, "Movies/B", 1000L, 100L),
+            createMediaItem("content://media/c", MediaType.VIDEO, "Movies/C", 1000L, 100L)
+        )
+        val scanner = object : MediaStoreScanner {
+            override suspend fun scanVolume(volumeName: String, onProgress: (ScanProgress) -> Unit) = scannedList
+        }
+
+        StorageSyncManager(mediaRepository, scanner, safDirectoryScanner)
+            .scanAndSyncMediaStore("external_primary") { }
+
+        assertEquals(0, mediaRepository.folderMediaQueryCount)
+        assertEquals(2, mediaRepository.volumeQueryCount)
+    }
+
     private fun createMediaItem(
         uri: String,
         type: MediaType,

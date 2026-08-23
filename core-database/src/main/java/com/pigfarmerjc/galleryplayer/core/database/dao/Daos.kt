@@ -49,6 +49,9 @@ interface MediaItemDao {
         mediaItems.forEach { upsert(it) }
     }
 
+    @Upsert
+    suspend fun upsertScannedBatch(mediaItems: List<MediaItemEntity>)
+
     @Query("DELETE FROM media_items WHERE content_uri IN (:contentUris)")
     suspend fun deleteByUris(contentUris: List<String>)
 
