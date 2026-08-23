@@ -90,6 +90,7 @@ fun PlayerScreen(
     skipSeconds: Int,
     repeatMode: PlaybackRepeatMode,
     onRepeatModeChange: (PlaybackRepeatMode) -> Unit,
+    isInPictureInPictureMode: Boolean = false,
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {}
 ) {
@@ -134,6 +135,12 @@ fun PlayerScreen(
     val audioTracks by playbackEngine.audioTracks.collectAsState()
     val subtitleTracks by playbackEngine.subtitleTracks.collectAsState()
     val videoSize by playbackEngine.videoSize.collectAsState()
+
+    LaunchedEffect(videoSize, state, videoList.size, videoTitle) {
+        context.findActivity()?.let { activity ->
+            updatePictureInPictureParams(activity, videoSize, state, videoList.size, videoTitle)
+        }
+    }
 
     var controlsVisible by remember { mutableStateOf(true) }
     var speedExpanded by remember { mutableStateOf(false) }
@@ -254,19 +261,12 @@ fun PlayerScreen(
     // Handle playback ended state based on PlaybackRepeatMode
     LaunchedEffect(state) {
         if (state == PlaybackState.Ended) {
-            when (repeatMode) {
-                PlaybackRepeatMode.NONE -> {
+            when (val action = playbackEndAction(repeatMode, currentIndex, videoList.size)) {
+                PlaybackEndAction.Stop -> saveProgressAndStop()
+                PlaybackEndAction.Replay -> playbackEngine.open(android.net.Uri.parse(videoUri))
+                is PlaybackEndAction.Advance -> {
                     saveProgressAndStop()
-                }
-                PlaybackRepeatMode.ONE -> {
-                    playbackEngine.open(android.net.Uri.parse(videoUri))
-                }
-                PlaybackRepeatMode.ALL -> {
-                    saveProgressAndStop()
-                    if (videoList.isNotEmpty()) {
-                        val nextIndex = (currentIndex + 1) % videoList.size
-                        onChangeVideo(nextIndex)
-                    }
+                    action.nextIndex?.let(onChangeVideo)
                 }
             }
         }
@@ -714,7 +714,7 @@ fun PlayerScreen(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible && !isInPictureInPictureMode,
             modifier = Modifier.fillMaxSize(),
             enter = fadeIn(tween(160)),
             exit = fadeOut(tween(110))
@@ -757,8 +757,7 @@ fun PlayerScreen(
                         IconButton(onClick = {
                             val activity = context.findActivity()
                             if (activity != null) {
-                                val params = android.app.PictureInPictureParams.Builder().build()
-                                activity.enterPictureInPictureMode(params)
+                                enterPictureInPicture(activity, videoSize, state, videoList.size, videoTitle)
                             }
                         }) {
                             Icon(Icons.Filled.PictureInPictureAlt, contentDescription = "画中画", tint = Color.White)
@@ -945,8 +944,8 @@ fun PlayerScreen(
                 ) {
                     val sliderValue = if (isDragging) dragPosition else position.toFloat()
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(formatTime(sliderValue.toLong()), color = Color.White, style = MaterialTheme.typography.labelMedium)
-                        Text(formatTime(duration), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
+                        Text(formatPlayerTime(sliderValue.toLong()), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                        Text(formatPlayerTime(duration), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
                     }
                     Slider(
                         value = sliderValue.coerceIn(0f, maxOf(duration.toFloat(), 1f)),
@@ -1023,14 +1022,3 @@ fun PlayerScreen(
     }
 }
 
-private fun formatTime(ms: Long): String {
-    val totalSecs = ms / 1000
-    val hours = totalSecs / 3600
-    val minutes = (totalSecs % 3600) / 60
-    val seconds = totalSecs % 60
-    return if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format("%02d:%02d", minutes, seconds)
-    }
-}

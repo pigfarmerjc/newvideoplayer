@@ -2,6 +2,11 @@ package com.pigfarmerjc.galleryplayer
 
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -34,6 +39,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.content.ContextCompat
 import com.pigfarmerjc.galleryplayer.core.player.api.DecoderMode
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackEngine
 import com.pigfarmerjc.galleryplayer.core.player.api.PlaybackState
@@ -397,8 +403,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 class MainActivity : ComponentActivity() {
 
+    private var pipMode by mutableStateOf(false)
+    private var pipCommandHandler: ((PipCommand) -> Unit)? = null
+    private val pipControlReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ACTION_PIP_CONTROL) return
+            val commandName = intent.getStringExtra(EXTRA_PIP_COMMAND) ?: return
+            val command = runCatching { PipCommand.valueOf(commandName) }.getOrNull() ?: return
+            pipCommandHandler?.invoke(command)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ContextCompat.registerReceiver(
+            this,
+            pipControlReceiver,
+            IntentFilter(ACTION_PIP_CONTROL),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
         insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -693,6 +716,52 @@ class MainActivity : ComponentActivity() {
                             // Layer 3: Overlay Player (if active)
                             val activePlayer = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
                             if (activePlayer != null) {
+                                val changePlayerVideo: (Int) -> Unit = { newIndex ->
+                                    val newItem = activePlayer.videoList[newIndex]
+                                    val pIdx = screenStack.indexOfLast { it is Screen.Player }
+                                    if (pIdx >= 0) {
+                                        screenStack[pIdx] = Screen.Player(
+                                            videoUri = newItem.contentUri,
+                                            videoTitle = newItem.displayName,
+                                            videoList = activePlayer.videoList,
+                                            currentIndex = newIndex,
+                                            initialPositionMs = 0L
+                                        )
+                                    }
+                                    scope.launch {
+                                        val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
+                                        if (resumePos > 0L) {
+                                            viewModel.playbackEngine.seekTo(resumePos)
+                                            android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+
+                                DisposableEffect(activePlayer.videoUri, activePlayer.currentIndex, activePlayer.videoList.size) {
+                                    pipCommandHandler = { command ->
+                                        when (command) {
+                                            PipCommand.PREVIOUS -> adjacentVideoIndex(
+                                                activePlayer.currentIndex,
+                                                activePlayer.videoList.size,
+                                                -1
+                                            )?.let(changePlayerVideo)
+                                            PipCommand.NEXT -> adjacentVideoIndex(
+                                                activePlayer.currentIndex,
+                                                activePlayer.videoList.size,
+                                                1
+                                            )?.let(changePlayerVideo)
+                                            PipCommand.TOGGLE_PLAYBACK -> {
+                                                if (isActivelyPlaying(viewModel.playbackEngine.playbackState.value)) {
+                                                    viewModel.playbackEngine.pause()
+                                                } else {
+                                                    viewModel.playbackEngine.play()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    onDispose { pipCommandHandler = null }
+                                }
+
                                 PlayerScreen(
                                     videoUri = activePlayer.videoUri,
                                     videoTitle = activePlayer.videoTitle,
@@ -700,26 +769,7 @@ class MainActivity : ComponentActivity() {
                                     currentIndex = activePlayer.currentIndex,
                                     playbackEngine = viewModel.playbackEngine,
                                     videoOutputFactory = viewModel.videoOutputFactory,
-                                    onChangeVideo = { newIndex ->
-                                        val newItem = activePlayer.videoList[newIndex]
-                                        val pIdx = screenStack.indexOfLast { it is Screen.Player }
-                                        if (pIdx >= 0) {
-                                            screenStack[pIdx] = Screen.Player(
-                                                videoUri = newItem.contentUri,
-                                                videoTitle = newItem.displayName,
-                                                videoList = activePlayer.videoList,
-                                                currentIndex = newIndex,
-                                                initialPositionMs = 0L
-                                            )
-                                        }
-                                        scope.launch {
-                                            val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
-                                            if (resumePos > 0L) {
-                                                viewModel.playbackEngine.seekTo(resumePos)
-                                                android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
+                                    onChangeVideo = changePlayerVideo,
                                     onBack = {
                                         val pIdx = screenStack.indexOfLast { it is Screen.Player }
                                         if (pIdx >= 0) screenStack.removeAt(pIdx)
@@ -745,6 +795,7 @@ class MainActivity : ComponentActivity() {
                                     skipSeconds = viewModel.skipSeconds,
                                     repeatMode = viewModel.repeatModeState,
                                     onRepeatModeChange = { viewModel.updateRepeatMode(it) },
+                                    isInPictureInPictureMode = pipMode,
                                     isFavorite = viewModel.isFavorite(activePlayer.videoUri),
                                     onToggleFavorite = { viewModel.toggleFavorite(activePlayer.videoUri) }
                                 )
@@ -754,5 +805,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipMode = isInPictureInPictureMode
+    }
+
+    override fun onDestroy() {
+        pipCommandHandler = null
+        unregisterReceiver(pipControlReceiver)
+        super.onDestroy()
     }
 }
