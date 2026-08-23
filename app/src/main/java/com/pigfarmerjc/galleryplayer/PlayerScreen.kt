@@ -33,6 +33,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -797,6 +798,13 @@ fun PlayerScreen(
                     }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         IconButton(onClick = {
+                            context.findActivity()?.let { activity ->
+                                enterPictureInPicture(activity, videoSize, state, videoList.size, videoTitle)
+                            }
+                        }) {
+                            Icon(Icons.Filled.PictureInPictureAlt, contentDescription = "系统画中画", tint = Color.White)
+                        }
+                        IconButton(onClick = {
                             if (Settings.canDrawOverlays(context)) {
                                 onFloatingWindowRequest()
                             } else {
@@ -808,7 +816,7 @@ fun PlayerScreen(
                                 )
                             }
                         }) {
-                            Icon(Icons.Filled.PictureInPictureAlt, contentDescription = "自由小窗", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "自由小窗", tint = Color.White)
                         }
                     }
                     val repeatIcon = when (repeatMode) {

@@ -36,4 +36,19 @@ class FloatingWindowLayoutTest {
         assertEquals(FloatingWindowPosition(0, 0), clampFloatingWindowPosition(-50, -90, size, 1600, 2560))
         assertEquals(FloatingWindowPosition(1100, 1760), clampFloatingWindowPosition(9000, 9000, size, 1600, 2560))
     }
+
+    @Test
+    fun `display change resizes and clamps window into new bounds`() {
+        val reflowed = reflowFloatingWindow(
+            currentSize = FloatingWindowSize(822, 1289),
+            currentPosition = FloatingWindowPosition(700, 1200),
+            aspectRatio = 9f / 16f,
+            screenWidth = 2560,
+            screenHeight = 1600
+        )
+
+        assertTrue(reflowed.size.height <= 1280)
+        assertTrue(reflowed.position.x + reflowed.size.width <= 2560)
+        assertTrue(reflowed.position.y + reflowed.size.height <= 1600)
+    }
 }

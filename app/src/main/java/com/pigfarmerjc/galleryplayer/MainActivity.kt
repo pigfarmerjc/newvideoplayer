@@ -49,8 +49,10 @@ import com.pigfarmerjc.galleryplayer.player.libvlc.LibVlcVideoOutputHostFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     val playbackEngine: PlaybackEngine = LibVlcPlaybackEngine(application)
@@ -397,7 +399,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        playbackEngine.release()
+        FloatingPlaybackSession.releaseOrDefer(playbackEngine)
     }
 }
 
@@ -719,6 +721,7 @@ class MainActivity : ComponentActivity() {
                             if (activePlayer != null) {
                                 val changePlayerVideo: (Int) -> Unit = { newIndex ->
                                     val newItem = activePlayer.videoList[newIndex]
+                                    val openDirectly = floatingWindowActive
                                     val pIdx = screenStack.indexOfLast { it is Screen.Player }
                                     if (pIdx >= 0) {
                                         screenStack[pIdx] = Screen.Player(
@@ -730,9 +733,22 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                     scope.launch {
+                                        if (openDirectly) {
+                                            viewModel.playbackEngine.open(android.net.Uri.parse(newItem.contentUri))
+                                        }
                                         val resumePos = viewModel.getResumePlaybackPosition(newItem.contentUri)
+                                        val currentPlayerIndex = screenStack.indexOfLast { it is Screen.Player }
+                                        val currentPlayer = screenStack.getOrNull(currentPlayerIndex) as? Screen.Player
+                                        if (currentPlayer?.videoUri == newItem.contentUri) {
+                                            screenStack[currentPlayerIndex] = currentPlayer.copy(initialPositionMs = resumePos)
+                                        }
                                         if (resumePos > 0L) {
-                                            viewModel.playbackEngine.seekTo(resumePos)
+                                            if (openDirectly) {
+                                                withTimeoutOrNull(3_000L) {
+                                                    viewModel.playbackEngine.isSeekable.first { it }
+                                                }
+                                                viewModel.playbackEngine.seekTo(resumePos)
+                                            }
                                             android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
                                         }
                                     }

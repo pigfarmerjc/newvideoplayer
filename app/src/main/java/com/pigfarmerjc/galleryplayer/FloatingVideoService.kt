@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -82,6 +83,26 @@ class FloatingVideoService : Service() {
             ACTION_CLOSE -> closeFloatingWindow(returnToApp = false)
         }
         return START_NOT_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        rootView?.post {
+            val params = layoutParams ?: return@post
+            val screen = currentScreenSize()
+            val placement = reflowFloatingWindow(
+                currentSize = FloatingWindowSize(params.width, params.height),
+                currentPosition = FloatingWindowPosition(params.x, params.y),
+                aspectRatio = currentAspectRatio,
+                screenWidth = screen.width,
+                screenHeight = screen.height
+            )
+            params.width = placement.size.width
+            params.height = placement.size.height
+            params.x = placement.position.x
+            params.y = placement.position.y
+            updateWindowLayout()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -193,7 +214,9 @@ class FloatingVideoService : Service() {
             gravity = Gravity.CENTER
             setBackgroundColor(0x99000000.toInt())
         }
-        val previous = iconButton(android.R.drawable.ic_media_previous, "上一个") { session.onPrevious() }
+        val previous = iconButton(android.R.drawable.ic_media_previous, "上一个") {
+            FloatingPlaybackSession.configuration?.onPrevious?.invoke()
+        }
         val playPause = iconButton(android.R.drawable.ic_media_pause, "播放或暂停") {
             val engine = session.playbackEngine
             when {
@@ -206,7 +229,9 @@ class FloatingVideoService : Service() {
             }
         }
         playPauseButton = playPause
-        val next = iconButton(android.R.drawable.ic_media_next, "下一个") { session.onNext() }
+        val next = iconButton(android.R.drawable.ic_media_next, "下一个") {
+            FloatingPlaybackSession.configuration?.onNext?.invoke()
+        }
         val repeat = iconButton(android.R.drawable.ic_menu_more, repeatModeLabel(session.repeatMode())) {
             FloatingPlaybackSession.configuration?.let { current ->
                 val nextMode = nextRepeatMode(current.repeatMode())
