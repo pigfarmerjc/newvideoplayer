@@ -21,3 +21,4 @@ test-media/*
 
 .kotlin/
 .gradle-tmp/
+.worktrees/
