@@ -5,6 +5,7 @@ import com.pigfarmerjc.galleryplayer.core.player.api.VideoOutputHostFactory
 
 object FloatingPlaybackSession {
     private val lock = Any()
+    private var activeConfiguration: Configuration? = null
     private var deferredReleaseEngine: PlaybackEngine? = null
 
     data class Configuration(
@@ -30,9 +31,15 @@ object FloatingPlaybackSession {
         }
     }
 
+    fun activate(configuration: Configuration) {
+        synchronized(lock) {
+            if (this.configuration === configuration) activeConfiguration = configuration
+        }
+    }
+
     fun releaseOrDefer(engine: PlaybackEngine) {
         val releaseNow = synchronized(lock) {
-            if (configuration?.playbackEngine === engine) {
+            if (activeConfiguration?.playbackEngine === engine) {
                 deferredReleaseEngine = engine
                 false
             } else {
@@ -47,6 +54,7 @@ object FloatingPlaybackSession {
             val active = this.configuration
             if (configuration != null && active !== configuration) return@synchronized null
             this.configuration = null
+            activeConfiguration = null
             deferredReleaseEngine?.takeIf { deferred ->
                 configuration == null || active?.playbackEngine === deferred
             }.also { deferred ->

@@ -109,6 +109,7 @@ class FloatingVideoService : Service() {
 
     private fun showFloatingWindow() {
         val session = FloatingPlaybackSession.configuration ?: return
+        FloatingPlaybackSession.activate(session)
         val screen = currentScreenSize()
         val videoSize = session.playbackEngine.videoSize.value
         val initialSize = initialFloatingWindowSize(

@@ -719,6 +719,7 @@ class MainActivity : ComponentActivity() {
                             // Layer 3: Overlay Player (if active)
                             val activePlayer = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
                             if (activePlayer != null) {
+                                var playerNavigationJob by remember(activePlayer.videoList) { mutableStateOf<Job?>(null) }
                                 val changePlayerVideo: (Int) -> Unit = { newIndex ->
                                     val newItem = activePlayer.videoList[newIndex]
                                     val openDirectly = floatingWindowActive
@@ -732,7 +733,9 @@ class MainActivity : ComponentActivity() {
                                             initialPositionMs = 0L
                                         )
                                     }
-                                    scope.launch {
+                                    playerNavigationJob?.cancel()
+                                    playerNavigationJob = scope.launch {
+                                        val outputRevisionBeforeOpen = viewModel.playbackEngine.videoOutputRevision.value
                                         if (openDirectly) {
                                             viewModel.playbackEngine.open(android.net.Uri.parse(newItem.contentUri))
                                         }
@@ -744,10 +747,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                         if (resumePos > 0L) {
                                             if (openDirectly) {
-                                                withTimeoutOrNull(3_000L) {
+                                                val outputReady = withTimeoutOrNull(3_000L) {
+                                                    viewModel.playbackEngine.videoOutputRevision.first {
+                                                        it > outputRevisionBeforeOpen
+                                                    }
                                                     viewModel.playbackEngine.isSeekable.first { it }
+                                                } == true
+                                                val latestPlayer = screenStack.lastOrNull { it is Screen.Player } as? Screen.Player
+                                                if (outputReady && latestPlayer?.videoUri == newItem.contentUri && floatingWindowActive) {
+                                                    viewModel.playbackEngine.seekTo(resumePos)
                                                 }
-                                                viewModel.playbackEngine.seekTo(resumePos)
                                             }
                                             android.widget.Toast.makeText(context, "已从上次位置继续播放", android.widget.Toast.LENGTH_SHORT).show()
                                         }

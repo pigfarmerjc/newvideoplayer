@@ -29,12 +29,40 @@ class FloatingPlaybackSessionTest {
         )
 
         FloatingPlaybackSession.configure(configuration)
+        FloatingPlaybackSession.activate(configuration)
         FloatingPlaybackSession.releaseOrDefer(engine)
         assertFalse(engine.released)
 
         FloatingPlaybackSession.clear(configuration)
         assertTrue(engine.released)
     }
+
+    @Test
+    fun `configured full screen session does not defer engine release`() {
+        val engine = RecordingPlaybackEngine()
+        val configuration = configuration(engine)
+
+        FloatingPlaybackSession.configure(configuration)
+        FloatingPlaybackSession.releaseOrDefer(engine)
+
+        assertTrue(engine.released)
+        FloatingPlaybackSession.clear(configuration)
+    }
+
+    private fun configuration(engine: PlaybackEngine) = FloatingPlaybackSession.Configuration(
+        playbackEngine = engine,
+        videoOutputFactory = object : VideoOutputHostFactory {
+            override fun create(context: Context): VideoOutputHost = error("unused")
+        },
+        title = { "title" },
+        contentUri = { "content://video" },
+        playlistSize = { 1 },
+        repeatMode = { PlaybackRepeatMode.NONE },
+        onRepeatModeChange = {},
+        onPrevious = {},
+        onNext = {},
+        onClosed = {}
+    )
 }
 
 private class RecordingPlaybackEngine : PlaybackEngine {

@@ -383,6 +383,7 @@ open class LibVlcPlaybackEngine protected constructor(
         currentUri = uri
         _positionMs.value = 0L
         _durationMs.value = 0L
+        _isSeekable.value = false
         _videoSize.value = null
         hasRetriedForCurrentUri = false
         updateDiagnostics(uri = uri.toString(), libvlcEvent = "Opening", width = 0, height = 0)
