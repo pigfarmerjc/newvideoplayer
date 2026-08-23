@@ -22,3 +22,7 @@ test-media/*
 .kotlin/
 .gradle-tmp/
 .worktrees/
+
+# Machine-specific repair artifacts belong outside the Android repository.
+/tools/windows-repair/
+/windows-repair-backup/

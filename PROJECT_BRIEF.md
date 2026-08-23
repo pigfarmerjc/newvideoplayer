@@ -18,6 +18,8 @@ This document summarizes the background, goals, and current state of the Gallery
 - **Library Filtering & Sorting**: Persistent search text matching, file sorting (name, date, size, duration), and folder sorting (name, video count, size, date).
 - **Home Hub Layout**: "Continue Watching" horizontal carousel showing recently played unfinished videos.
 - **Player Interaction**: Double-tap to seek custom seconds, horizontal swipe to switch videos, swipe-down to dismiss player, status bar immersive toggling, speed controllers, and repeat modes (`NONE`, `ONE`, `ALL`).
+- **Floating Playback**: Free-position application overlay with portrait/landscape adaptation, drag, pinch/handle resize, auto-hiding controls, previous/next, repeat mode, and first-frame poster fallback.
+- **Large Library Performance**: Batched incremental synchronization plus coalesced thumbnail decoding and constant-time fallback lookup.
 
 ---
 
